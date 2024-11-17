@@ -39,6 +39,121 @@ void initializeServer(int* TCP_socket_fd, int* UDP_socket_fd, int tcp_port, int 
     listenOnSocket(*TCP_socket_fd, 10);
     //bindSocket(*UDP_socket_fd, udp_port);
 }
+bool checkMessage(const string& message)
+{
+    if (message.empty())
+    {
+        cerr << "Error: Received an empty message.\n";
+        return false;
+    }
+    return true;
+}
+int handleClientMenu(const string& message, int client_socket)
+{
+    char op = message[0];
+    string response;
+    if (op == '1')
+    {
+        response = "OK We will help you register!!";
+        sendMessage(client_socket, response);
+        return 2; // 進入註冊流程
+    }
+    else if (op == '2')
+    {
+        response = "OK We will help you login!!";
+        sendMessage(client_socket, response);
+        return 3; // 進入登入流程
+    }
+    else if (op == '3')
+    {
+        response = "OK bye!!";
+        sendMessage(client_socket, response);
+        return 0; // 結束
+    }
+    else
+    {
+        response = "Unknown command";
+        sendMessage(client_socket, response);
+        return 1; // 回到主選單
+    }
+}
+int handleClientRegister(const string& client_name, const string& client_pwd, int client_socket)
+{
+    string response;
+    if (checkRegister(client_name))
+    {
+        WriteToTable(client_name, client_pwd, REGISTER_TABLE);
+        response = "Register success!!";
+        cout << "Client (" << client_name << ") registered successfully.\n";
+        sendMessage(client_socket, response);
+        return 1; // 回到主選單
+    }
+    else
+    {
+        response = "Fail to register:( " + client_name + " has been used!!";
+        cerr << "Error: Registration failed for (" << client_name << ") - Name already used.\n";
+        sendMessage(client_socket, response);
+        return 1; // 回到主選單
+    }
+}
+int handleClientLogin(const string& client_name, const string& client_pwd, int client_socket)
+{
+    string response;
+    int verify_result = verifyPassword(client_name, client_pwd);
+    if (verify_result == 1)
+    {
+        WriteToTable(client_name, client_pwd, LOGIN_TABLE);
+        response = "login success!!";
+        cout << "Client (" << client_name << ") logged in successfully.\n";
+        sendMessage(client_socket, response);
+        return 4; // 進入服務狀態
+    }
+    else if (verify_result == 2)
+    {
+        response = "Fail to login:( We cannot find " + client_name;
+        cerr << "Error: Login failed for (" << client_name << ") - User not found.\n";
+        sendMessage(client_socket, response);
+        return 1; // 回到主選單
+    }
+    else
+    {
+        response = "Password not match!";
+        cerr << "Error: Login failed for (" << client_name << ") - Password mismatch.\n";
+        sendMessage(client_socket, response);
+        return 1; // 回到主選單
+    }
+}
+int handleClientServe(const string& message, const string& client_name, const string& client_pwd, int client_socket)
+{
+    char op = message[0];
+    string response;
+    if (op == '1')
+    {
+        response = "OK We will help you to chat with your friends!! (not implemented)";
+        sendMessage(client_socket, response);
+        return 4; // 繼續停留在服務狀態
+    }
+    else if (op == '2')
+    {
+        response = "OK we will help you logout!!";
+        DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
+        sendMessage(client_socket, response);
+        return 1; // 回到主選單
+    }
+    else if (op == '3')
+    {
+        response = "OK bye!!";
+        DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
+        sendMessage(client_socket, response);
+        return 0; // 結束
+    }
+    else
+    {
+        response = "Unknown command";
+        sendMessage(client_socket, response);
+        return 4; // 停留在服務狀態
+    }
+}
 void handleTCPConnection(int tcp_socket) 
 {
     struct sockaddr_storage client_address;
@@ -49,164 +164,50 @@ void handleTCPConnection(int tcp_socket)
         cout << "Accept new client, client_socket is " << client_socket << "\n";
         string message_to_client;
         string message_to_server;
-        string log_client_name;
-        string log_client_pwd;
+        string client_name;
+        string client_pwd;
         int status = 1;
         while (status != 0)
         {
             while (status == 1) // client 還在選要 register 還是 login 還是 exit
             {
                 message_to_server = receiveMessage(client_socket);
-                if (message_to_server.empty()) 
-                {
-                    cout << "Client disconnected, client_socket is " << client_socket << "\n";
-                    status = 0;
-                    break;
-                }
-                char op;
-                op = message_to_server[0];
-                if (op == '1') 
-                {
-                    message_to_client = "OK We will help you register!!";
-                    status = 2;
-                } 
-                else if (op == '2') 
-                {
-                    message_to_client = "OK We will help you login!!";
-                    status = 3;
-                } 
-                else if (op == '3') 
-                {
-                    message_to_client = "OK bye!!";
-                    status = 0;
-                } 
-                else 
-                {
-                    message_to_client = "Unknown command";
-                    status = 1;
-                }
-                sendMessage(client_socket, message_to_client);
+                status = checkMessage(message_to_server);
+                if (!status) break;
                 Print_message(message_to_server, 2);
+                status = handleClientMenu(message_to_server, client_socket);
             }
             while (status == 2) // client 在 Register 中
             {
                 cout << "client now is register\n";
-                string client_name = receiveMessage(client_socket);
-                if (client_name.empty()) 
-                {
-                    cout << "Client disconnected, client_socket is " << client_socket << "\n";
-                    status = 0;
-                    break;
-                }
-                //cout << "?";
-                string client_pwd = receiveMessage(client_socket);
-                //cout << "client_pwd is " << client_pwd << "\n";
-                if (client_pwd.empty()) 
-                {
-                    cout << "Client disconnected, client_socket is " << client_socket << "\n";
-                    status = 0;
-                    break;
-                }
-                //cout << "here " << client_name << " " << client_pwd << "\n";
-                //cout << "is OK " << checkRegister(client_name) << "\n";
-                if (checkRegister(client_name))
-                {
-                    message_to_client = "Register success!!";
-                    cout << "client_socket : " << client_socket << "(" << client_name << ")" << " register successfully" << "\n";
-                    sendMessage(client_socket, message_to_client);
-                    WriteToTable(client_name, client_pwd, REGISTER_TABLE);
-                    PrintAllRegister(); //這邊之後要改到其他地方處理
-                    status = 1;
-                }
-                else
-                {
-                    message_to_client = "Fail to register:( " + client_name + " has be used!!";
-                    cout << "client_socket : " << client_socket << " Fail to register:( \n";
-                    sendMessage(client_socket, message_to_client);
-                    status = 1;
-                }
+                client_name = receiveMessage(client_socket);
+                status = checkMessage(client_name);
+                if (!status) break;
+                client_pwd = receiveMessage(client_socket);
+                status = checkMessage(client_pwd);
+                if (!status) break;
+                status = handleClientRegister(client_name, client_pwd, client_socket);
             }
             while (status == 3) // client 在 login 中
             {
-                string client_name = receiveMessage(client_socket);
-                if (client_name.empty()) 
-                {
-                    cout << "Client disconnected, client_socket is " << client_socket << "\n";
-                    status = 0;
-                    break;
-                }
-                string client_pwd = receiveMessage(client_socket);
-                if (client_pwd.empty()) 
-                {
-                    cout << "Client disconnected, client_socket is " << client_socket << "\n";
-                    status = 0;
-                    break;
-                }
-                
-                if (verifyPassword(client_name, client_pwd) == 1)
-                {
-                    message_to_client = "login success!!";
-                    cout << "client_socket : " << client_socket << "(" << client_name << ")" << " login successfully" << "\n";
-                    //cout << client_name << " login success!!\n";
-                    WriteToTable(client_name, client_pwd, LOGIN_TABLE);
-                    log_client_name = client_name;
-                    log_client_pwd = client_pwd;
-                    sendMessage(client_socket, message_to_client);
-                    PrintAllLogin(); //這邊之後要改到其他地方處理
-                    status = 4;
-                }
-                else if (verifyPassword(client_name, client_pwd) == 2)
-                {
-                    message_to_client = "Fail to login:( We cannot find " + client_name;
-                    cout << "client_socket : " << client_socket << " Fail to register:( \n";
-                    sendMessage(client_socket, message_to_client);
-                    status = 1;
-                }
-                else
-                {
-                    message_to_client = "Password not match!";
-                    cout << "client_socket : " << client_socket << " Fail to login:( \n";
-                    sendMessage(client_socket, message_to_client);
-                    status = 1;
-                }
+                client_name = receiveMessage(client_socket);
+                status = checkMessage(client_name);
+                if (!status) break;
+                client_pwd = receiveMessage(client_socket);
+                status = checkMessage(client_pwd);
+                if (!status) break;
+                status = handleClientLogin(client_name, client_pwd, client_socket);
             }
             while (status == 4) // login成功
             {
                 message_to_server = receiveMessage(client_socket);
-                if (message_to_server.empty()) 
-                {
-                    cout << "Client disconnected, client_socket is " << client_socket << "\n";
-                    status = 0;
-                    break;
-                }
-                char op;
-                op = message_to_server[0];
-                if (op == '1') 
-                {
-                    message_to_client = "OK We will help you to chat with your friends!! (hasn't finish)";
-                    status = 4;
-                } 
-                else if (op == '2') 
-                {
-                    message_to_client = "OK we will help you logout!!";
-                    DelToTable(log_client_name, log_client_pwd, LOGIN_TABLE);
-                    status = 1;
-                } 
-                else if (op == '3') 
-                {
-                    message_to_client = "OK bye!!";
-                    DelToTable(log_client_name, log_client_pwd, LOGIN_TABLE);
-                    status = 0;
-                } 
-                else 
-                {
-                    message_to_client = "Unknown command";
-                    status = 4;
-                }
-                sendMessage(client_socket, message_to_client);
+                status = checkMessage(message_to_server);
+                if (!status) break;
                 Print_message(message_to_server, 2);
+                status = handleClientServe(message_to_server, client_name, client_pwd, client_socket);
             }
         }
+        DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
     }
     //receiveMessage(client_socket);    // 接收消息
     //transferFile(client_socket);      // 文件傳輸
