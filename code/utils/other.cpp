@@ -5,6 +5,7 @@
 #include <iostream>
 #include "other.h"
 using namespace std;
+#define LOG_FILE "./data/Log.log"
 void writeLog(const string &log_message) 
 {
     ofstream log_file(LOG_FILE, ios::app); // 以追加方式打開日誌文件
