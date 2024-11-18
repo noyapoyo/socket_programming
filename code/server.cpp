@@ -4,6 +4,8 @@
 #include <map>
 #include <string>
 #include <sstream>
+#include <queue>
+#include <csignal>
 #include "./utils/other.h"
 #include "./utils/network_utils.h"
 #include "./utils/auth_utils.h"
@@ -11,6 +13,7 @@
 #include "./utils/status_change.h"
 #define DEFAULT_TCP_PORT 8080
 #define DEFAULT_UDP_PORT 9090
+#define THREAD_POOL_SIZE 10
 #define REGISTER_TABLE "./data/users_table.txt"
 #define LOGIN_TABLE "./data/online_table.txt"
 using namespace std;
@@ -31,7 +34,12 @@ using namespace std;
 /*
 需傳送狀態碼給客戶，也需接收給server的狀態碼
 */
-map <string, int> online_map;
+//map <string, int> online_map;
+queue<int> taskQueue;                // 客戶端 socket 描述符的任務隊列
+pthread_mutex_t queueMutex;          // 任務隊列的互斥鎖
+pthread_cond_t conditionVar;         // 任務隊列的條件變量
+pthread_t threadPool[THREAD_POOL_SIZE]; // 線程池
+bool isRunning = true;
 void initializeServer(int* TCP_socket_fd, int* UDP_socket_fd, int tcp_port, int udp_port)
 {
     *TCP_socket_fd = createSocket();
@@ -40,71 +48,99 @@ void initializeServer(int* TCP_socket_fd, int* UDP_socket_fd, int tcp_port, int 
     listenOnSocket(*TCP_socket_fd, 10);
     //bindSocket(*UDP_socket_fd, udp_port);
 }
-void handleTCPConnection(int tcp_socket) 
+void handleTCPConnection(int client_socket) 
 {
-    struct sockaddr_storage client_address;
-    socklen_t addr_len = sizeof(client_address);
-    int client_socket = acceptConnection(tcp_socket, &client_address);
-    if (client_socket > 0)
+    cout << "Handling client connection: " << client_socket << "\n";
+    string message_to_client;
+    string message_to_server;
+    string client_name;
+    string client_pwd;
+    int status = 1;
+    while (status != 0)
     {
-        cout << "Accept new client, client_socket is " << client_socket << "\n";
-        string message_to_client;
-        string message_to_server;
-        string client_name;
-        string client_pwd;
-        int status = 1;
-        while (status != 0)
+        while (status == 1) // client 還在選要 register 還是 login 還是 exit
         {
-            while (status == 1) // client 還在選要 register 還是 login 還是 exit
-            {
-                message_to_server = receiveMessage(client_socket);
-                status = checkMessage(message_to_server, status);
-                if (!status) break;
-                Print_message(message_to_server, 2);
-                status = handleClientMenu(message_to_server, client_socket);
-            }
-            while (status == 2) // client 在 Register 中
-            {
-                cout << "client now is register\n";
-                client_name = receiveMessage(client_socket);
-                status = checkMessage(client_name, status);
-                if (!status) break;
-                client_pwd = receiveMessage(client_socket);
-                status = checkMessage(client_pwd, status);
-                if (!status) break;
-                status = handleClientRegister(client_name, client_pwd, client_socket);
-            }
-            while (status == 3) // client 在 login 中
-            {
-                client_name = receiveMessage(client_socket);
-                status = checkMessage(client_name, status);
-                if (!status) break;
-                client_pwd = receiveMessage(client_socket);
-                status = checkMessage(client_pwd, status);
-                if (!status) break;
-                status = handleClientLogin(client_name, client_pwd, client_socket);
-            }
-            while (status == 4) // login成功
-            {
-                message_to_server = receiveMessage(client_socket);
-                status = checkMessage(message_to_server, status);
-                if (!status) break;
-                Print_message(message_to_server, 2);
-                status = handleClientServe(message_to_server, client_name, client_pwd, client_socket);
-            }
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
+            if (!status) break;
+            Print_message(message_to_server, 2);
+            status = handleClientMenu(message_to_server, client_socket);
         }
-        DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
+        while (status == 2) // client 在 Register 中
+        {
+            cout << "client now is register\n";
+            client_name = receiveMessage(client_socket);
+            status = checkMessage(client_name, status);
+            if (!status) break;
+            client_pwd = receiveMessage(client_socket);
+            status = checkMessage(client_pwd, status);
+            if (!status) break;
+            status = handleClientRegister(client_name, client_pwd, client_socket);
+        }
+        while (status == 3) // client 在 login 中
+        {
+            client_name = receiveMessage(client_socket);
+            status = checkMessage(client_name, status);
+            if (!status) break;
+            client_pwd = receiveMessage(client_socket);
+            status = checkMessage(client_pwd, status);
+            if (!status) break;
+            status = handleClientLogin(client_name, client_pwd, client_socket);
+        }
+        while (status == 4) // login成功
+        {
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
+            if (!status) break;
+            Print_message(message_to_server, 2);
+            status = handleClientServe(message_to_server, client_name, client_pwd, client_socket);
+        }
     }
+    DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
     closeSocket(client_socket);
 }
-/*
-1. message
-*/
+void* threadWork(void* arg)
+{
+    while (isRunning)
+    {
+        int client_socket;
+        // 從任務隊列中取出任務
+        pthread_mutex_lock(&queueMutex);
+        while (taskQueue.empty())
+        {
+            pthread_cond_wait(&conditionVar, &queueMutex);
+        }
+        client_socket = taskQueue.front();
+        taskQueue.pop();
+        pthread_mutex_unlock(&queueMutex);
+        handleTCPConnection(client_socket);
+    }
+    return nullptr;
+}
+void initializeThreadPool()
+{
+    pthread_mutex_init(&queueMutex, nullptr);
+    pthread_cond_init(&conditionVar, nullptr);
+    for (int i = 0; i < THREAD_POOL_SIZE; i++)
+    {
+        pthread_create(&threadPool[i], nullptr, threadWork, nullptr);
+    }
+    cout << "Thread pool initialized with " << THREAD_POOL_SIZE << " threads.\n";
+}
 void handleUDPConnection(int udp_socket)
 {
     char buffer[1024];
     struct sockaddr_storage client_address;
     socklen_t addr_len = sizeof(client_address);
+}
+void signalHandler(int signal)
+{
+    if (signal == SIGINT)
+    {
+        cout << "\nSIGINT received. Shutting down server...\n";
+        isRunning = false;
+        pthread_cond_broadcast(&conditionVar);
+    }
 }
 int main(int argc, char* argv[]) 
 {
@@ -122,12 +158,32 @@ int main(int argc, char* argv[])
     int TCP_socket_fd = -1;
     int UDP_socket_fd = -1;
     initializeServer(&TCP_socket_fd, &UDP_socket_fd, tcp_port, udp_port);
+    initializeThreadPool();
+    //signal(SIGTERM, SIG_IGN);
+    signal(SIGINT, signalHandler);
     while (true) 
     {
-        handleTCPConnection(TCP_socket_fd);
+        struct sockaddr_storage client_address;
+        socklen_t addr_len = sizeof(client_address);
+        int client_socket = acceptConnection(TCP_socket_fd, &client_address);
+        //handleTCPConnection(client_socket);
+        if (client_socket > 0)
+        {
+            pthread_mutex_lock(&queueMutex); // 將新客戶端加入任務隊列
+            taskQueue.push(client_socket);
+            pthread_cond_signal(&conditionVar); // 通知線程池
+            pthread_mutex_unlock(&queueMutex);
+        }
         // handleUDPConnection(UDP_socket_fd);
     }
+    isRunning = false;
+    pthread_cond_broadcast(&conditionVar); // 通知所有線程退出
+    for (int i = 0; i < THREAD_POOL_SIZE; i++)
+    {
+        pthread_join(threadPool[i], nullptr); // 等待所有線程退出
+    }
+    pthread_mutex_destroy(&queueMutex); // 銷毁互斥鎖
+    pthread_cond_destroy(&conditionVar); // 銷毁條件變量
     closeSocket(TCP_socket_fd);
-    //closeSocket(UDP_socket_fd);
     return 0;
 }
