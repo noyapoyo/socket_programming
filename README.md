@@ -28,7 +28,7 @@
 
 專案的主要目錄結構如下：
 ```plaintext
-socket_programming/
+41247066S/
 ├── README.md               # 文件說明
 └── code/                   # 源碼目錄
     ├── Makefile            # 編譯指令
