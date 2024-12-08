@@ -164,7 +164,7 @@ void handleTextMessage(const string& sender, const string& receiver, int sender_
 */
 
 
-
+/*
 // 發送消息函數
 void sendMessage(int socket_fd, const string& identifier, const string& message)
 {
@@ -192,7 +192,7 @@ void sendMessage(int socket_fd, const string& identifier, const string& message)
 }
 
 
-/*
+
 // 接收消息函數
 pair<string, string> receiveMessage(int socket_fd)
 {
