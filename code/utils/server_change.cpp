@@ -1,11 +1,35 @@
-#include "status_change.h"
+#include "server_change.h"
 #include <iostream>
 using namespace std;
 
 #define REGISTER_TABLE "./data/users_table.txt"
-#define LOGIN_TABLE "./data/online_table.txt"
-
+#define LOGIN_TABLE "./data/login_table.txt"
+#define ONLINE_TABLE "./data/online_table.txt"
 // 檢查訊息是否有效
+void updateClientStatus(int client_socket, int status) 
+{
+    //cout << "here\n";
+    pthread_mutex_lock(&statusMutex);
+    clientStatus[client_socket] = status; // 更新狀態
+    //cout << "Updated clientStatus: [";
+    for (const auto& [key, value] : clientStatus) 
+    {
+        cout << "socket_fd: " << key << " -> status: " << value << "\n";
+    }
+    //cout << "]" << "\n";
+    pthread_mutex_unlock(&statusMutex);
+}
+// 移除客戶端的工具函數
+void removeClient(int client_socket) 
+{
+    pthread_mutex_lock(&statusMutex);
+    clientStatus.erase(client_socket); // 從狀態表中移除
+    for (const auto& [key, value] : clientStatus) 
+    {
+        cout << "socket_fd: " << key << " -> status: " << value << "\n";
+    }
+    pthread_mutex_unlock(&statusMutex);
+}
 int checkMessage(const string& message, int status)
 {
     if (message.empty())
@@ -15,13 +39,11 @@ int checkMessage(const string& message, int status)
     }
     return status;
 }
-
 // 主選單處理邏輯，返回下一個狀態
 int handleClientMenu(const string& message, int client_socket)
 {
     char op = message[0];
     string response;
-
     if (op == '1')
     {
         response = "OK We will help you register!!";
@@ -82,6 +104,7 @@ int handleClientLogin(const string& client_name, const string& client_pwd, int c
         response = "login success!!";
         cout << "Client (" << client_name << ") logged in successfully.\n";
         sendMessage(client_socket, response);
+
         return 4; // 進入服務狀態
     }
     else if (verify_result == 2)
@@ -133,115 +156,73 @@ int handleClientServe(const string& message, const string& client_name, const st
         return 4; // 繼續停留在服務狀態
     }
 }
+int getUserSocket(const string& username) 
+{
+    pthread_mutex_lock(&statusMutex);
+    int userSocket = usernameToSocket.find(username) == usernameToSocket.end() ? -1 : usernameToSocket[username];
+    pthread_mutex_unlock(&statusMutex);
+    return userSocket;
+}
+bool isUserOnline(const string& user_name)
+{
+    return getUserSocket(user_name) != -1 ? false : true;
+}
+/*
+int handleTextMessage(const string& sender, const string& receiver, int sender_socket) 
+{
+    //sendMessage(sender_socket, "Enter your message:");
+    string message = receiveMessage(sender_socket);
+    int receiver_socket = getUserSocket(receiver);
+    if (receiver_socket == -1) 
+    {
+        sendMessage(sender_socket, "Message could not be delivered. Target user went offline.");
+        return -1; 
+    }
+    string full_message = sender + ": " + message;
+    sendMessage(receiver_socket, full_message);
+    sendMessage(sender_socket, "Message sent successfully!");
+    return 5;
+}
+int handleChatServe(const string& client_name, int client_socket, string* target_name) 
+{
+    sendMessage(client_socket, "Who do you want to chat?");
+    *target_name = receiveMessage(client_socket);
+    if (isUserOnline(*target_name) == -1)
+    {
+        sendMessage(client_socket, "Target user is not online.");
+        *target_name == NULL;
+        return 5;
+    }
+    return 6;
+}
+int handleSendData(const string& client_name, int client_socket, const string& target_name)
+{
+    sendMessage(client_socket, 
+                "Choose what to send:\n"
+                "0. quit\n"
+                "1. Text Message\n"
+                "2. Image\n"
+                "3. Video\n"
+                "4. Audio\n"
+                "5. Live Call\n"
+                "6. Live Video");
+    string choice = receiveMessage(client_socket);
+    if (choice == "0") 
+    {
+        return 4;
+    } 
+    else if (choice == "1") 
+    {
+        handleTextMessage(client_name, target_name, client_socket);
+        return 5;
+    } 
+    else 
+    {
+        sendMessage(client_socket, "This feature is not implemented yet.");
+        return 5;
+    }
+    return 5;
+}
+*/
 ////////////////////////////////////////////////////此線以下是client端狀態轉移函數
 // 主選單邏輯
-int clientMainMenu(int server_socket, int status)
-{
-    string op;
-    string message_to_server, server_to_client;
-    int result = status;
-    cout << "Enter operation (1: Register, 2: Login, 3: Exit): ";
-    cin >> op;
-    if (op == "1") 
-    {
-        message_to_server = op + " I want to register!!";
-        result = 2; // 進入註冊流程
-    } 
-    else if (op == "2") 
-    {
-        message_to_server = op + " I want to login!!";
-        result = 3; // 進入登入流程
-    } 
-    else if (op == "3") 
-    {
-        message_to_server = op + " I want to exit!!";
-        result = 0; // 結束
-    } 
-    else 
-    {
-        cout << "Unknown operation." << "\n";
-        result = 1; // 返回主選單
-    }
-    sendMessage(server_socket, message_to_server);
-    server_to_client = receiveMessage(server_socket);
-    result = checkMessage(server_to_client, result);
-    if (!result)
-    {
-        cout << "Server break!\n";
-        return result;
-    }
-    Print_message(server_to_client, 1);
-    return result;
-    
-}
-
-// 認證邏輯（註冊/登入）
-int clientAuthProcess(int server_socket, int status)
-{
-    string my_name, my_pwd, server_to_client;
-
-    cout << "Input your name: ";
-    cin >> my_name;
-    cout << "Input your password: ";
-    cin >> my_pwd;
-    sendMessage(server_socket, my_name);
-    sendMessage(server_socket, my_pwd);
-    server_to_client = receiveMessage(server_socket);
-    if (!checkMessage(server_to_client, status))
-    {
-        cout << "Server break!\n";
-        return 0;
-    }
-    Print_message(server_to_client, 1);
-    if (server_to_client == "Register success!!")
-    {
-        return 1; // 返回主選單
-    }
-    else if (server_to_client == "login success!!")
-    {
-        return 4; // 登入成功，進入服務狀態
-    }
-    else
-    {
-        return 1; // 認證失敗，返回主選單
-    }
-}
-
-// 服務選單邏輯
-int clientServiceMenu(int server_socket, int status)
-{
-    string op, message_to_server, server_to_client;
-    int result = status;
-    cout << "Enter operation (1: Chat with someone, 2: Logout, 3: Exit): ";
-    cin >> op;
-    if (op == "1") 
-    {
-        message_to_server = op + " I want to chat with someone!!";
-        result = 4; // 停留在服務狀態
-    } 
-    else if (op == "2") 
-    {
-        message_to_server = op + " I want to logout!!";
-        result = 1; // 返回主選單
-    } 
-    else if (op == "3") 
-    {
-        message_to_server = op + " I want to exit!!";
-        result = 0; // 結束
-    } 
-    else 
-    {
-        cout << "Unknown operation." << "\n";
-        result = 4; // 停留在服務狀態
-    }
-    sendMessage(server_socket, message_to_server);
-    server_to_client = receiveMessage(server_socket);
-    result = checkMessage(server_to_client, result);
-    if (!result)
-    {
-        cout << "Server break!\n";
-        return result;
-    }
-    Print_message(server_to_client, 1);
-    return result;
-}

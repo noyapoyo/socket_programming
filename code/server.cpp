@@ -10,12 +10,14 @@
 #include "./utils/network_utils.h"
 #include "./utils/auth_utils.h"
 #include "./utils/message_utils.h"
-#include "./utils/status_change.h"
+#include "./utils/server_change.h"
+#include "global.h"
 #define DEFAULT_TCP_PORT 8080
 #define DEFAULT_UDP_PORT 9090
 #define THREAD_POOL_SIZE 10
 #define REGISTER_TABLE "./data/users_table.txt"
-#define LOGIN_TABLE "./data/online_table.txt"
+#define LOGIN_TABLE "./data/login_table.txt"
+#define ONLINE_TABLE "./data/online_table.txt"
 using namespace std;
 //公共IP -> ssh 41147009s@ws4.csie.ntu.edu.tw    
 //連線方法 ./client ws4.csie.ntu.edu.tw 8080
@@ -35,11 +37,21 @@ using namespace std;
 需傳送狀態碼給客戶，也需接收給server的狀態碼
 */
 //map <string, int> online_map;
+
+
+/*
+map<int, int> clientStatus; // 客户端狀態表
+pthread_mutex_t statusMutex;     // 狀態互斥鎖
+*/
 queue<int> taskQueue;                // 客戶端 socket 描述符的任務隊列
 pthread_mutex_t queueMutex;          // 任務隊列的互斥鎖
 pthread_cond_t conditionVar;         // 任務隊列的條件變量
-pthread_t threadPool[THREAD_POOL_SIZE]; // 線程池
 bool isRunning = true;
+static int TCP_socket_fd = -1;
+static int UDP_socket_fd = -1;
+pthread_t threadPool[THREAD_POOL_SIZE]; // 線程池
+
+
 void initializeServer(int* TCP_socket_fd, int* UDP_socket_fd, int tcp_port, int udp_port)
 {
     *TCP_socket_fd = createSocket();
@@ -56,46 +68,65 @@ void handleTCPConnection(int client_socket)
     string client_name;
     string client_pwd;
     int status = 1;
+    updateClientStatus(client_socket, status);
     while (status != 0)
     {
-        while (status == 1) // client 還在選要 register 還是 login 還是 exit
+        //cout << "here\n";
+        if (status == 1) // client 還在選要 register 還是 login 還是 exit
         {
             message_to_server = receiveMessage(client_socket);
             status = checkMessage(message_to_server, status);
-            if (!status) break;
+            if (!status) continue;
             Print_message(message_to_server, 2);
             status = handleClientMenu(message_to_server, client_socket);
+            updateClientStatus(client_socket, status);
         }
-        while (status == 2) // client 在 Register 中
+        if (status == 2) // client 在 Register 中
         {
             cout << "client now is register\n";
             client_name = receiveMessage(client_socket);
             status = checkMessage(client_name, status);
-            if (!status) break;
+            if (!status) continue;
             client_pwd = receiveMessage(client_socket);
             status = checkMessage(client_pwd, status);
-            if (!status) break;
+            if (!status) continue;
             status = handleClientRegister(client_name, client_pwd, client_socket);
+            updateClientStatus(client_socket, status);
         }
-        while (status == 3) // client 在 login 中
+        if (status == 3) // client 在 login 中
         {
             client_name = receiveMessage(client_socket);
             status = checkMessage(client_name, status);
-            if (!status) break;
+            if (!status) continue;
             client_pwd = receiveMessage(client_socket);
             status = checkMessage(client_pwd, status);
-            if (!status) break;
+            if (!status) continue;
             status = handleClientLogin(client_name, client_pwd, client_socket);
+            updateClientStatus(client_socket, status);
         }
-        while (status == 4) // login成功
+        if (status == 4) // login成功
         {
             message_to_server = receiveMessage(client_socket);
             status = checkMessage(message_to_server, status);
-            if (!status) break;
+            if (!status) continue;
             Print_message(message_to_server, 2);
             status = handleClientServe(message_to_server, client_name, client_pwd, client_socket);
+            updateClientStatus(client_socket, status);
         }
+        /*
+        if (status == 5) // 客戶在線中
+        {
+            string target_name;
+            status = handleChatServe(client_name, client_socket, &target_name);
+        }
+        if (status == 6) // 客戶在線中
+        {
+            status = handleSendData(client_name, client_socket);
+        }
+        */
+        
     }
+    removeClient(client_socket);
     DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
     closeSocket(client_socket);
 }
@@ -106,9 +137,14 @@ void* threadWork(void* arg)
         int client_socket;
         // 從任務隊列中取出任務
         pthread_mutex_lock(&queueMutex);
-        while (taskQueue.empty())
+        while (taskQueue.empty() && isRunning)
         {
             pthread_cond_wait(&conditionVar, &queueMutex);
+        }
+        if (!isRunning)
+        {
+            pthread_mutex_unlock(&queueMutex);
+            break;
         }
         client_socket = taskQueue.front();
         taskQueue.pop();
@@ -120,6 +156,7 @@ void* threadWork(void* arg)
 void initializeThreadPool()
 {
     pthread_mutex_init(&queueMutex, nullptr);
+    pthread_mutex_init(&statusMutex, nullptr);
     pthread_cond_init(&conditionVar, nullptr);
     for (int i = 0; i < THREAD_POOL_SIZE; i++)
     {
@@ -137,9 +174,23 @@ void signalHandler(int signal)
 {
     if (signal == SIGINT)
     {
-        cout << "\nSIGINT received. Shutting down server...\n";
         isRunning = false;
-        pthread_cond_broadcast(&conditionVar);
+        cout << "server break!!\n";
+        pthread_cond_broadcast(&conditionVar); // 通知所有線程退出
+        for (int i = 0; i < THREAD_POOL_SIZE; i++)
+        {
+            pthread_join(threadPool[i], nullptr); // 等待所有線程退出
+        }
+        pthread_mutex_destroy(&queueMutex); // 銷毁互斥鎖
+        pthread_mutex_destroy(&statusMutex); // 銷毀 statusMutex
+        pthread_cond_destroy(&conditionVar); // 銷毁條件變量
+        if (TCP_socket_fd > 0)
+        {
+            closeSocket(TCP_socket_fd);
+            TCP_socket_fd = -1;
+        }
+        cout << "Server has shut down gracefully.\n";
+        exit(0);
     }
 }
 int main(int argc, char* argv[]) 
@@ -155,18 +206,18 @@ int main(int argc, char* argv[])
         udp_port = atoi(argv[2]);
     }
     cout << "Starting server on TCP port " << tcp_port << " and UDP port " << udp_port << "\n";
-    int TCP_socket_fd = -1;
-    int UDP_socket_fd = -1;
+    
     initializeServer(&TCP_socket_fd, &UDP_socket_fd, tcp_port, udp_port);
     initializeThreadPool();
     //signal(SIGTERM, SIG_IGN);
     signal(SIGINT, signalHandler);
-    while (true) 
+    while (isRunning) 
     {
         struct sockaddr_storage client_address;
         socklen_t addr_len = sizeof(client_address);
         int client_socket = acceptConnection(TCP_socket_fd, &client_address);
         //handleTCPConnection(client_socket);
+        if (!isRunning) break;
         if (client_socket > 0)
         {
             pthread_mutex_lock(&queueMutex); // 將新客戶端加入任務隊列
@@ -176,14 +227,5 @@ int main(int argc, char* argv[])
         }
         // handleUDPConnection(UDP_socket_fd);
     }
-    isRunning = false;
-    pthread_cond_broadcast(&conditionVar); // 通知所有線程退出
-    for (int i = 0; i < THREAD_POOL_SIZE; i++)
-    {
-        pthread_join(threadPool[i], nullptr); // 等待所有線程退出
-    }
-    pthread_mutex_destroy(&queueMutex); // 銷毁互斥鎖
-    pthread_cond_destroy(&conditionVar); // 銷毁條件變量
-    closeSocket(TCP_socket_fd);
     return 0;
 }
