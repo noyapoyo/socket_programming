@@ -16,6 +16,9 @@
 2. **作業系統**：Unix-based 系統（如 Linux 或 macOS）。
    - 如果使用 Windows，可以使用 WSL（Windows Subsystem for Linux）來模擬 Unix-based 環境。
 3. **網路工具**：確認您的作業系統支援 POSIX 的 socket 函式庫（例如 `sys/socket.h`、`netinet/in.h`、`arpa/inet.h`）。
+4. **要安裝的函式庫**：確認您的作業系統輸入過以下指令
+    - sudo apt update
+    - sudo apt install libssl-dev
 
 #### 函式庫
 專案只需使用系統內建的標準 C++ 函式庫，因此無需安裝額外的函式庫。請確認環境支援以下標頭檔：

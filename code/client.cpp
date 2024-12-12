@@ -3,12 +3,17 @@
 #include <arpa/inet.h>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 #include "./utils/other.h"
 #include "./utils/network_utils.h"
 #include "./utils/auth_utils.h"
 #include "./utils/message_utils.h"
 #include "./utils/client_change.h"
 #include <string>
+#include <iostream>
+#define PROMPT "prompt"
+#define MESSAGE "message"
+#define NORMAL "normal"
 using namespace std;
 int main(int argc, char* argv[])
 {
@@ -17,63 +22,110 @@ int main(int argc, char* argv[])
         cerr << "Usage: " << argv[0] << " <hostname or IP> <port>" << "\n";
         return 1;
     }
+
     int server_socket = createSocket();
     string hostname = argv[1];
     string port = argv[2];
-    connectToServer(server_socket, (const string)hostname, (const string)port);
+    connectToServer(server_socket, hostname, port);
+
     int status = 1;
-    bool hasMessage = false; // 表示是否有新消息
-    string incomingMessage;
+    int pre_status;
+    bool hasPrompted = false; // 用於標記是否已經提示
+    pair<string, string> incomingMessage;
+
     while (status != 0)
     {
-        string message_to_server;
-        string server_to_client;
-        int tem_status;
-        /*
-        if (!hasMessage) 
+        if (status < 4)
         {
-            if (isDataAvailable(server_socket)) 
+            if (status == 1)
             {
-                incomingMessage = receiveMessage(server_socket);
-                hasMessage = true;
-                tem_status = status;
-                status = 7;
+                //cout << "here\n";
+                status = clientMainMenu(server_socket, status);
+            }
+            else if (status == 2 || status == 3)
+            {
+                status = clientAuthProcess(server_socket, status);
             }
         }
-        */
-        if (status == 1) 
+        else // 狀態 4 及其後，使用 select
         {
-            status = clientMainMenu(server_socket, status);
-        }
-        if (status == 2 || status == 3)
-        {
-            status = clientAuthProcess(server_socket, status);
-        }
-        if (status == 4)
-        {
-            status = clientServiceMenu(server_socket, status);
-        }
-        /*
-        if (status == 5) //選擇和哪個客戶聊天的狀態
-        {
-            string target_name;
-            status = chatSome(server_socket, status, &target_name);
-        }
-        if (status == 6) //一個持續與客戶B傳訊息的狀態
-        {
+            fd_set readfds;
+            FD_ZERO(&readfds);
+            FD_SET(STDIN_FILENO, &readfds); // 監視標準输入
+            FD_SET(server_socket, &readfds); // 監視服務器消息
+            int max_fd = max(STDIN_FILENO, server_socket);
+            int activity = select(max_fd + 1, &readfds, nullptr, nullptr, nullptr);
+            if (activity < 0)
+            {
+                perror("select");
+                break;
+            }
+            
+            // 處理服務器消息
+            if (FD_ISSET(server_socket, &readfds))
+            {
+                incomingMessage = receiveMessage(server_socket);
+                if (!checkMessage(incomingMessage, status))
+                {
+                    cerr << "Server disconnected or invalid message received." << "\n";
+                    break;
+                }
+                if (incomingMessage.first == NORMAL)
+                {
+                    cout << incomingMessage.second << "\n";
+                    //cout << incomingMessage.second; //不能正常顯示
+                    //Print_message(incomingMessage.second, 1);
+                    //cout << incomingMessage.second;
+                    //status = MsgStatusChange(incomingMessage.second, status);
+                }
+                else if (incomingMessage.first == PROMPT)
+                {
+                    Print_message(incomingMessage.second, 1);
+                    //cout << "now my status -> " << status << "\n";
+                    status = MsgStatusChange(incomingMessage.second, status);
+                    continue;
+                }
+                else if (incomingMessage.first == MESSAGE)
+                {
+                    cout << "\n--- New Message ---" << "\n";
+                    cout << incomingMessage.second << "\n";
+                    cout << "Press Enter to continue." << "\n";
+                    cout << "Message come my status = " << status << "\n";
+                    pre_status = status;
+                    status = 7;
+                }
+            }
 
+            // 處理用戶輸入
+            if (FD_ISSET(STDIN_FILENO, &readfds))
+            {
+                //PrintPrompt(status);
+                if (status == 4)
+                {
+                    clientServiceMenu(server_socket, status);
+                }
+                if (status == 5) //選和誰聊天
+                {
+                    chatSome(server_socket);
+                }
+                if (status == 6) //選要用甚麼聊
+                {
+                    chatAndSendData(server_socket);
+                }
+                if (status == 7)
+                {
+                    //cout << "here\n";
+                    string temp;
+                    getline(cin, temp); // 等待用户按下 Enter
+                    //cout << "I need to change my status from " << status << " to " << pre_status << "\n";
+                    status = pre_status;
+                    PrintPrompt(status);
+                    //sendMessage(server_socket, MESSAGE, to_string(status));
+                }
+            }
         }
-        if (status == 7) 
-        {
-            cout << "\n--- New Message ---\n";
-            cout << incomingMessage << "\n";
-            cout << "Press Enter to return.\n";
-            cin.ignore(); // 等待用户按下回车
-            hasMessage = false; // 重置消息标志
-            status = 5; // 返回聊天状态
-        }
-        */
     }
+
     closeSocket(server_socket);
     return 0;
 }

@@ -5,7 +5,8 @@
 #include <vector>
 #include "auth_utils.h"
 using namespace std;
-
+//sendMessage
+//receiveMessage
 bool checkRegister(const string &client_name) 
 {
     ifstream file("./data/users_table.txt");

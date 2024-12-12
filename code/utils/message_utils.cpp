@@ -11,59 +11,93 @@ using namespace std;
 /*
 這邊未來要引入pthread還有UDP傳送，會大改
 */
-void sendMessage(int socket_fd, const string &message) 
+// 發送消息函數
+void sendMessage(int socket_fd, const string& identifier, const string& message)
 {
-    int32_t message_length = message.size(); // 先發送消息的長度
+    // 並接消息標識符和內容，格式為：<標識符>:<消息內容>
+    string full_message = identifier + ":" + message;
+
+    // 發送消息的長度
+    int32_t message_length = full_message.size();
     message_length = htonl(message_length); // 將長度轉換為網絡字節序
-    if (send(socket_fd, &message_length, sizeof(message_length), 0) < 0) 
+
+    if (send(socket_fd, &message_length, sizeof(message_length), 0) < 0)
     {
         cerr << "Failed to send message length." << "\n";
-        closeSocket(socket_fd);
+        close(socket_fd);
         return;
     }
-    if (send(socket_fd, message.c_str(), message.size(), 0) < 0) // 發送實際消息內容
+
+    // 發送拼接後的消息
+    if (send(socket_fd, full_message.c_str(), full_message.size(), 0) < 0)
     {
         cerr << "Failed to send message content." << "\n";
-        closeSocket(socket_fd);
+        close(socket_fd);
         return;
     }
-    //cout << "Message sent successfully." << "\n";
 }
-string receiveMessage(int socket_fd) 
+
+
+
+// 接收消息函數
+pair<string, string> receiveMessage(int socket_fd)
 {
+    // 接收消息長度
     int32_t message_length_net;
     int bytes_received_length = 0;
+
     while (bytes_received_length < sizeof(message_length_net))
     {
-        int n = recv(socket_fd, ((char*)&message_length_net) + bytes_received_length, sizeof(message_length_net) - bytes_received_length, 0);
+        int n = recv(socket_fd, ((char*)&message_length_net) + bytes_received_length,
+                     sizeof(message_length_net) - bytes_received_length, 0);
+
         if (n <= 0)
         {
             cerr << "Failed to receive message length." << "\n";
-            closeSocket(socket_fd);
-            return "";
+            close(socket_fd);
+            return {"", ""};
         }
+
         bytes_received_length += n;
     }
+
     int32_t message_length = ntohl(message_length_net);
-    string message;
+
+    // 接收完整消息
+    string full_message;
     int total_received = 0;
-    while (total_received < message_length) 
+
+    while (total_received < message_length)
     {
         int bytes_to_read = message_length - total_received;
         char buffer[1024];
         int chunk_size = (bytes_to_read < sizeof(buffer)) ? bytes_to_read : sizeof(buffer);
         int bytes_received = recv(socket_fd, buffer, chunk_size, 0);
-        if (bytes_received <= 0) 
+
+        if (bytes_received <= 0)
         {
             cerr << "Failed to receive message content." << "\n";
-            closeSocket(socket_fd);
-            return "";
+            close(socket_fd);
+            return {"", ""};
         }
-        message.append(buffer, bytes_received);
+
+        full_message.append(buffer, bytes_received);
         total_received += bytes_received;
     }
-    //cout << "Message received successfully." << "\n";
-    return message;
+
+    // 解析標識符和內容
+    size_t delimiter_pos = full_message.find(":");
+
+    if (delimiter_pos == string::npos)
+    {
+        cerr << "Invalid message format received." << "\n";
+        return {"", full_message}; // 如果沒有標識符，返回整條消息作為內容
+    }
+
+    string identifier = full_message.substr(0, delimiter_pos);
+    string message = full_message.substr(delimiter_pos + 1);
+
+    return {identifier, message}; // 返回標識符和內容
 }
 int sendFile(const string& file_path, int client_socket) 
 {
@@ -164,93 +198,3 @@ void handleTextMessage(const string& sender, const string& receiver, int sender_
 */
 
 
-
-// 發送消息函數
-void sendMessage(int socket_fd, const string& identifier, const string& message)
-{
-    // 拼接消息標識符和內容，格式為：<標識符>:<消息內容>
-    string full_message = identifier + ":" + message;
-
-    // 發送消息的長度
-    int32_t message_length = full_message.size();
-    message_length = htonl(message_length); // 將長度轉換為網絡字節序
-
-    if (send(socket_fd, &message_length, sizeof(message_length), 0) < 0)
-    {
-        cerr << "Failed to send message length." << "\n";
-        close(socket_fd);
-        return;
-    }
-
-    // 發送拼接後的消息
-    if (send(socket_fd, full_message.c_str(), full_message.size(), 0) < 0)
-    {
-        cerr << "Failed to send message content." << "\n";
-        close(socket_fd);
-        return;
-    }
-}
-
-
-/*
-// 接收消息函數
-pair<string, string> receiveMessage(int socket_fd)
-{
-    // 接收消息長度
-    int32_t message_length_net;
-    int bytes_received_length = 0;
-
-    while (bytes_received_length < sizeof(message_length_net))
-    {
-        int n = recv(socket_fd, ((char*)&message_length_net) + bytes_received_length,
-                     sizeof(message_length_net) - bytes_received_length, 0);
-
-        if (n <= 0)
-        {
-            cerr << "Failed to receive message length." << "\n";
-            close(socket_fd);
-            return {"", ""};
-        }
-
-        bytes_received_length += n;
-    }
-
-    int32_t message_length = ntohl(message_length_net);
-
-    // 接收完整消息
-    string full_message;
-    int total_received = 0;
-
-    while (total_received < message_length)
-    {
-        int bytes_to_read = message_length - total_received;
-        char buffer[1024];
-        int chunk_size = (bytes_to_read < sizeof(buffer)) ? bytes_to_read : sizeof(buffer);
-        int bytes_received = recv(socket_fd, buffer, chunk_size, 0);
-
-        if (bytes_received <= 0)
-        {
-            cerr << "Failed to receive message content." << "\n";
-            close(socket_fd);
-            return {"", ""};
-        }
-
-        full_message.append(buffer, bytes_received);
-        total_received += bytes_received;
-    }
-
-    // 解析標識符和內容
-    size_t delimiter_pos = full_message.find(":");
-
-    if (delimiter_pos == string::npos)
-    {
-        cerr << "Invalid message format received." << "\n";
-        return {"", full_message}; // 如果沒有標識符，返回整條消息作為內容
-    }
-
-    string identifier = full_message.substr(0, delimiter_pos);
-    string message = full_message.substr(delimiter_pos + 1);
-
-    return {identifier, message}; // 返回標識符和內容
-}
-*/
