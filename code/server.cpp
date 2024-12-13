@@ -64,9 +64,12 @@ void handleTCPConnection(int client_socket)
 {
     cout << "Handling client connection: " << client_socket << "\n";
     string message_to_client;
-    string message_to_server;
+    pair<string, string> message_to_server;
+    string Msg;
+    //string Idt;
     string client_name;
     string client_pwd;
+    string my_target;
     int status = 1;
     updateClientStatus(client_socket, status);
     while (status != 0)
@@ -77,56 +80,89 @@ void handleTCPConnection(int client_socket)
             message_to_server = receiveMessage(client_socket);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
-            Print_message(message_to_server, 2);
-            status = handleClientMenu(message_to_server, client_socket);
+            //Idt = message_to_server.first;
+            Msg = message_to_server.second;
+            Print_message(Msg, 2);
+            status = handleClientMenu(Msg, client_socket);
             updateClientStatus(client_socket, status);
+            status = getStatus(client_socket);
         }
         if (status == 2) // client 在 Register 中
         {
             cout << "client now is register\n";
-            client_name = receiveMessage(client_socket);
-            status = checkMessage(client_name, status);
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
             if (!status) continue;
-            client_pwd = receiveMessage(client_socket);
-            status = checkMessage(client_pwd, status);
+            //Idt = message_to_server.first;
+            client_name = message_to_server.second;
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
             if (!status) continue;
+            client_pwd = message_to_server.second;
             status = handleClientRegister(client_name, client_pwd, client_socket);
             updateClientStatus(client_socket, status);
+            status = getStatus(client_socket);
         }
         if (status == 3) // client 在 login 中
-        {
-            client_name = receiveMessage(client_socket);
-            status = checkMessage(client_name, status);
-            if (!status) continue;
-            client_pwd = receiveMessage(client_socket);
-            status = checkMessage(client_pwd, status);
-            if (!status) continue;
-            status = handleClientLogin(client_name, client_pwd, client_socket);
-            updateClientStatus(client_socket, status);
-        }
-        if (status == 4) // login成功
         {
             message_to_server = receiveMessage(client_socket);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
-            Print_message(message_to_server, 2);
-            status = handleClientServe(message_to_server, client_name, client_pwd, client_socket);
+            //Idt = message_to_server.first;
+            client_name = message_to_server.second;
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
+            if (!status) continue;
+            client_pwd = message_to_server.second;
+            status = handleClientLogin(client_name, client_pwd, client_socket);
+            updateUsernameToSocket(client_socket, client_name);
             updateClientStatus(client_socket, status);
+            status = getStatus(client_socket);
         }
-        /*
+        if (status == 4) // login成功
+        {
+            string client_prompt = "Enter operation (1: Chat with someone, 2: Logout, 3: Exit): ";
+            sendMessage(client_socket, NORMAL, client_prompt);
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
+            if (!status) continue;
+            Msg = message_to_server.second;
+            Print_message(Msg, 2);
+            status = handleClientServe(Msg, client_name, client_pwd, client_socket);
+            updateClientStatus(client_socket, status);
+            if (status < 4)
+                removeUsernameToSocket(client_name);
+            status = getStatus(client_socket);
+        }
         if (status == 5) // 客戶在線中
         {
-            string target_name;
+            pair<string, string> target_name = {"", ""};
             status = handleChatServe(client_name, client_socket, &target_name);
+            if (target_name.first != "")
+                my_target = target_name.second;
+            updateClientStatus(client_socket, status);
+            status = getStatus(client_socket);
         }
         if (status == 6) // 客戶在線中
         {
-            status = handleSendData(client_name, client_socket);
+            status = handleSendData(client_name, client_socket, my_target);
+            updateClientStatus(client_socket, status);
+            status = getStatus(client_socket);
         }
-        */
+        if (status == 7) // 客戶在線中
+        {
+            //status = handleSendData(client_name, client_socket, my_target);
+            //updateClientStatus(client_socket, status);
+            message_to_server = receiveMessage(client_socket);
+            status = checkMessage(message_to_server, status);
+            status = stoi(message_to_server.second);
+            updateClientStatus(client_socket, status);
+            status = getStatus(client_socket);
+        }
         
     }
     removeClient(client_socket);
+    removeUsernameToSocket(client_name);
     DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
     closeSocket(client_socket);
 }
