@@ -5,10 +5,17 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 using namespace std;
-void sendMessage(int socket_fd, const string& identifier, const string& message);
-pair<string, string> receiveMessage(int socket_fd);
+void sendMessage(SSL* ssl, const string& identifier, const string& message);
+pair<string, string> receiveMessage(SSL* ssl);
 void Print_message(const string &message, int status); // 1 -> 伺服器對客戶， 2 -> 客戶對伺服器
 int sendFile(const string& file_path, int client_socket);
 int receiveFile(const string& file_path, int server_socket);
+void initSSL();
+SSL_CTX* serverCreateSSLContext();
+void serverConfigureSSLContext(SSL_CTX* ctx, const string& cert_file, const string& key_file);
+SSL_CTX* clientCreateSSLContext();
+void clientConfigureSSLContext(SSL_CTX* ctx, const string& ca_file);
 #endif // MESSAGE_UTILS_H

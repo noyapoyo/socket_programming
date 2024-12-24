@@ -12,7 +12,76 @@ using namespace std;
 這邊未來要引入pthread還有UDP傳送，會大改
 */
 // 發送消息函數
-void sendMessage(int socket_fd, const string& identifier, const string& message)
+void initSSL()
+{
+    SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+}
+
+SSL_CTX* serverCreateSSLContext()
+{
+    const SSL_METHOD* method = TLS_server_method(); // 使用伺服器模式
+    SSL_CTX* ctx = SSL_CTX_new(method);
+    if (!ctx)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
+void serverConfigureSSLContext(SSL_CTX* ctx, const string& cert_file, const string& key_file)
+{
+    // 加載伺服器證書
+    if (SSL_CTX_use_certificate_file(ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    // 加載伺服器私鑰
+    if (SSL_CTX_use_PrivateKey_file(ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    // 驗證私鑰是否匹配證書
+    if (!SSL_CTX_check_private_key(ctx))
+    {
+        cerr << "Private key does not match the certificate public key" << endl;
+        exit(EXIT_FAILURE);
+    }
+}
+SSL_CTX* clientCreateSSLContext()
+{
+    const SSL_METHOD* method = TLS_client_method(); // 使用客戶端模式
+    SSL_CTX* ctx = SSL_CTX_new(method);
+    if (!ctx)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
+void clientConfigureSSLContext(SSL_CTX* ctx, const string& ca_file)
+{
+    // 加載信任的 CA 根證書
+    if (!SSL_CTX_load_verify_locations(ctx, ca_file.c_str(), nullptr))
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    // 設置證書驗證模式（驗證伺服器證書）
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+    SSL_CTX_set_verify_depth(ctx, 4);
+}
+void sendMessage(SSL* ssl, const string& identifier, const string& message)
 {
     // 並接消息標識符和內容，格式為：<標識符>:<消息內容>
     string full_message = identifier + ":" + message;
@@ -21,26 +90,24 @@ void sendMessage(int socket_fd, const string& identifier, const string& message)
     int32_t message_length = full_message.size();
     message_length = htonl(message_length); // 將長度轉換為網絡字節序
 
-    if (send(socket_fd, &message_length, sizeof(message_length), 0) < 0)
+    if (SSL_write(ssl, &message_length, sizeof(message_length)) <= 0)
     {
         cerr << "Failed to send message length." << "\n";
-        close(socket_fd);
+        ERR_print_errors_fp(stderr);
         return;
     }
 
     // 發送拼接後的消息
-    if (send(socket_fd, full_message.c_str(), full_message.size(), 0) < 0)
+    if (SSL_write(ssl, full_message.c_str(), full_message.size()) <= 0)
     {
         cerr << "Failed to send message content." << "\n";
-        close(socket_fd);
+        ERR_print_errors_fp(stderr);
         return;
     }
 }
 
-
-
 // 接收消息函數
-pair<string, string> receiveMessage(int socket_fd)
+pair<string, string> receiveMessage(SSL* ssl)
 {
     // 接收消息長度
     int32_t message_length_net;
@@ -48,13 +115,13 @@ pair<string, string> receiveMessage(int socket_fd)
 
     while (bytes_received_length < sizeof(message_length_net))
     {
-        int n = recv(socket_fd, ((char*)&message_length_net) + bytes_received_length,
-                     sizeof(message_length_net) - bytes_received_length, 0);
+        int n = SSL_read(ssl, ((char*)&message_length_net) + bytes_received_length,
+                         sizeof(message_length_net) - bytes_received_length);
 
         if (n <= 0)
         {
             cerr << "Failed to receive message length." << "\n";
-            close(socket_fd);
+            ERR_print_errors_fp(stderr);
             return {"", ""};
         }
 
@@ -72,12 +139,12 @@ pair<string, string> receiveMessage(int socket_fd)
         int bytes_to_read = message_length - total_received;
         char buffer[1024];
         int chunk_size = (bytes_to_read < sizeof(buffer)) ? bytes_to_read : sizeof(buffer);
-        int bytes_received = recv(socket_fd, buffer, chunk_size, 0);
+        int bytes_received = SSL_read(ssl, buffer, chunk_size);
 
         if (bytes_received <= 0)
         {
             cerr << "Failed to receive message content." << "\n";
-            close(socket_fd);
+            ERR_print_errors_fp(stderr);
             return {"", ""};
         }
 
