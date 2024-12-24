@@ -12,6 +12,8 @@
 #include "./utils/message_utils.h"
 #include "./utils/server_change.h"
 #include "global.h"
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #define DEFAULT_TCP_PORT 8080
 #define DEFAULT_UDP_PORT 9090
 #define THREAD_POOL_SIZE 10
@@ -19,6 +21,7 @@
 #define LOGIN_TABLE "./data/login_table.txt"
 #define ONLINE_TABLE "./data/online_table.txt"
 using namespace std;
+//這邊先關掉 git.enabled
 //公共IP -> ssh 41147009s@ws4.csie.ntu.edu.tw    
 //連線方法 ./client ws4.csie.ntu.edu.tw 8080
 //connectToServer 尚未完成
@@ -50,7 +53,13 @@ bool isRunning = true;
 static int TCP_socket_fd = -1;
 static int UDP_socket_fd = -1;
 pthread_t threadPool[THREAD_POOL_SIZE]; // 線程池
-
+SSL_CTX* ssl_ctx; // 全局 SSL 上下文
+void initializeSSL()
+{
+    initSSL();
+    ssl_ctx = serverCreateSSLContext();
+    serverConfigureSSLContext(ssl_ctx, "server.crt", "server.key");
+}
 
 void initializeServer(int* TCP_socket_fd, int* UDP_socket_fd, int tcp_port, int udp_port)
 {
@@ -63,6 +72,37 @@ void initializeServer(int* TCP_socket_fd, int* UDP_socket_fd, int tcp_port, int 
 void handleTCPConnection(int client_socket) 
 {
     cout << "Handling client connection: " << client_socket << "\n";
+    // SSL 初始化
+    //initializeSSL();
+    SSL* ssl = SSL_new(ssl_ctx);
+    SSL_set_fd(ssl, client_socket);
+    //cout << "Before SSL_accept\n";
+    if (SSL_accept(ssl) <= 0)
+    {
+        //cout << "SSL_accept failed\n";
+        int err = SSL_get_error(ssl, -1);
+        switch (err)
+        {
+            case SSL_ERROR_ZERO_RETURN:
+                cerr << "SSL connection closed by client.\n";
+                break;
+            case SSL_ERROR_WANT_READ:
+            case SSL_ERROR_WANT_WRITE:
+                cerr << "SSL_accept needs more data to proceed.\n";
+                break;
+            case SSL_ERROR_SYSCALL:
+                perror("SSL_accept system call error");
+                break;
+            case SSL_ERROR_SSL:
+            default:
+                cerr << "SSL_accept failed.\n";
+                ERR_print_errors_fp(stderr);
+                break;
+        }
+        closeSocket(client_socket);
+        return;
+    }
+    //cout << "After SSL_accept\n";
     string message_to_client;
     pair<string, string> message_to_server;
     string Msg;
@@ -71,99 +111,104 @@ void handleTCPConnection(int client_socket)
     string client_pwd;
     string my_target;
     int status = 1;
-    updateClientStatus(client_socket, status);
+    //cout << "here\n";
+    updateClientStatus(ssl, status);
+    //cout << "here_2\n";
     while (status != 0)
     {
         //cout << "here\n";
+        //cout << "now status " << status << "\n";
         if (status == 1) // client 還在選要 register 還是 login 還是 exit
         {
-            message_to_server = receiveMessage(client_socket);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
             //Idt = message_to_server.first;
             Msg = message_to_server.second;
             Print_message(Msg, 2);
-            status = handleClientMenu(Msg, client_socket);
-            updateClientStatus(client_socket, status);
-            status = getStatus(client_socket);
+            status = handleClientMenu(Msg, ssl);
+            updateClientStatus(ssl, status);
+            status = getStatus(ssl);
         }
         if (status == 2) // client 在 Register 中
         {
             cout << "client now is register\n";
-            message_to_server = receiveMessage(client_socket);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
             //Idt = message_to_server.first;
             client_name = message_to_server.second;
-            message_to_server = receiveMessage(client_socket);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
             client_pwd = message_to_server.second;
-            status = handleClientRegister(client_name, client_pwd, client_socket);
-            updateClientStatus(client_socket, status);
-            status = getStatus(client_socket);
+            status = handleClientRegister(client_name, client_pwd, ssl);
+            updateClientStatus(ssl, status);
+            status = getStatus(ssl);
         }
         if (status == 3) // client 在 login 中
         {
-            message_to_server = receiveMessage(client_socket);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
             //Idt = message_to_server.first;
             client_name = message_to_server.second;
-            message_to_server = receiveMessage(client_socket);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
             client_pwd = message_to_server.second;
-            status = handleClientLogin(client_name, client_pwd, client_socket);
-            updateUsernameToSocket(client_socket, client_name);
-            updateClientStatus(client_socket, status);
-            status = getStatus(client_socket);
+            status = handleClientLogin(client_name, client_pwd, ssl);
+            updateUsernameToSSL(ssl, client_name);
+            updateClientStatus(ssl, status);
+            status = getStatus(ssl);
         }
         if (status == 4) // login成功
         {
             string client_prompt = "Enter operation (1: Chat with someone, 2: Logout, 3: Exit): ";
-            sendMessage(client_socket, NORMAL, client_prompt);
-            message_to_server = receiveMessage(client_socket);
+            sendMessage(ssl, NORMAL, client_prompt);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             if (!status) continue;
             Msg = message_to_server.second;
             Print_message(Msg, 2);
-            status = handleClientServe(Msg, client_name, client_pwd, client_socket);
-            updateClientStatus(client_socket, status);
+            status = handleClientServe(Msg, client_name, client_pwd, ssl);
+            updateClientStatus(ssl, status);
             if (status < 4)
-                removeUsernameToSocket(client_name);
-            status = getStatus(client_socket);
+                removeUsernameToSSL(client_name);
+            status = getStatus(ssl);
         }
         if (status == 5) // 客戶在線中
         {
             pair<string, string> target_name = {"", ""};
-            status = handleChatServe(client_name, client_socket, &target_name);
+            status = handleChatServe(client_name, ssl, &target_name);
             if (target_name.first != "")
                 my_target = target_name.second;
-            updateClientStatus(client_socket, status);
-            status = getStatus(client_socket);
+            updateClientStatus(ssl, status);
+            status = getStatus(ssl);
         }
         if (status == 6) // 客戶在線中
         {
-            status = handleSendData(client_name, client_socket, my_target);
-            updateClientStatus(client_socket, status);
-            status = getStatus(client_socket);
+            status = handleSendData(client_name, ssl, my_target);
+            updateClientStatus(ssl, status);
+            status = getStatus(ssl);
         }
         if (status == 7) // 客戶在線中
         {
             //status = handleSendData(client_name, client_socket, my_target);
             //updateClientStatus(client_socket, status);
-            message_to_server = receiveMessage(client_socket);
+            message_to_server = receiveMessage(ssl);
             status = checkMessage(message_to_server, status);
             status = stoi(message_to_server.second);
-            updateClientStatus(client_socket, status);
-            status = getStatus(client_socket);
+            updateClientStatus(ssl, status);
+            status = getStatus(ssl);
         }
-        
     }
-    removeClient(client_socket);
-    removeUsernameToSocket(client_name);
+
+    removeClient(ssl);
+    removeUsernameToSSL(client_name);
     DelToTable(client_name, client_pwd, LOGIN_TABLE); // 清除在線名單
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
     closeSocket(client_socket);
 }
 void* threadWork(void* arg)
@@ -200,12 +245,6 @@ void initializeThreadPool()
     }
     cout << "Thread pool initialized with " << THREAD_POOL_SIZE << " threads.\n";
 }
-void handleUDPConnection(int udp_socket)
-{
-    char buffer[1024];
-    struct sockaddr_storage client_address;
-    socklen_t addr_len = sizeof(client_address);
-}
 void signalHandler(int signal)
 {
     if (signal == SIGINT)
@@ -225,6 +264,10 @@ void signalHandler(int signal)
             closeSocket(TCP_socket_fd);
             TCP_socket_fd = -1;
         }
+        if (ssl_ctx)
+        {
+            SSL_CTX_free(ssl_ctx);
+        }
         cout << "Server has shut down gracefully.\n";
         exit(0);
     }
@@ -233,6 +276,9 @@ int main(int argc, char* argv[])
 {
     int tcp_port = DEFAULT_TCP_PORT;
     int udp_port = DEFAULT_UDP_PORT;
+
+    initializeSSL(); // 初始化 SSL
+
     if (argc >= 2) 
     {
         tcp_port = atoi(argv[1]);
@@ -245,15 +291,19 @@ int main(int argc, char* argv[])
     
     initializeServer(&TCP_socket_fd, &UDP_socket_fd, tcp_port, udp_port);
     initializeThreadPool();
-    //signal(SIGTERM, SIG_IGN);
     signal(SIGINT, signalHandler);
+
     while (isRunning) 
     {
         struct sockaddr_storage client_address;
         socklen_t addr_len = sizeof(client_address);
         int client_socket = acceptConnection(TCP_socket_fd, &client_address);
-        //handleTCPConnection(client_socket);
-        if (!isRunning) break;
+
+        if (!isRunning)
+        {
+            break;
+        }
+
         if (client_socket > 0)
         {
             pthread_mutex_lock(&queueMutex); // 將新客戶端加入任務隊列
@@ -261,7 +311,7 @@ int main(int argc, char* argv[])
             pthread_cond_signal(&conditionVar); // 通知線程池
             pthread_mutex_unlock(&queueMutex);
         }
-        // handleUDPConnection(UDP_socket_fd);
     }
+
     return 0;
 }

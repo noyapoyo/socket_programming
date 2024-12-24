@@ -12,11 +12,11 @@
 #define NORMAL "normal"
 using namespace std;
 int checkMessage(const pair<string, string>& message, int status);
-int clientMainMenu(int server_socketint, int status);
-int clientAuthProcess(int server_socket, int status);
-void clientServiceMenu(int server_socket, int status);
-void chatSome(int server_socket);
-void chatAndSendData(int server_socket);
+int clientMainMenu(SSL* ssl, int status);
+int clientAuthProcess(SSL* ssl, int status);
+void clientServiceMenu(SSL* ssl, int status);
+void chatSome(SSL* ssl);
+void chatAndSendData(SSL* ssl);
 int MsgStatusChange(const string& Msg, int status);
 void PrintPrompt(int status);
 #endif // CLIENT_CHANGE_H

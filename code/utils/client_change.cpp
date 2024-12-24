@@ -14,7 +14,7 @@ int checkMessage(const pair<string, string>& message, int status)
     }
     return status;
 }
-int clientMainMenu(int server_socket, int status)
+int clientMainMenu(SSL* ssl, int status)
 {
     string op;
     string message_to_server;
@@ -47,8 +47,8 @@ int clientMainMenu(int server_socket, int status)
         cout << "Unknown operation." << "\n";
         result = 1; // 返回主選單
     }
-    sendMessage(server_socket, NORMAL, message_to_server);
-    server_response = receiveMessage(server_socket);
+    sendMessage(ssl, NORMAL, message_to_server);
+    server_response = receiveMessage(ssl);
     result = checkMessage(server_response, result);
     if (!result)
     {
@@ -61,7 +61,7 @@ int clientMainMenu(int server_socket, int status)
 }
 
 // 認證邏輯（註冊/登入）
-int clientAuthProcess(int server_socket, int status)
+int clientAuthProcess(SSL* ssl, int status)
 {
     string my_name, my_pwd;
     pair<string, string> server_response;
@@ -69,9 +69,9 @@ int clientAuthProcess(int server_socket, int status)
     cin >> my_name;
     cout << "Input your password: ";
     cin >> my_pwd;
-    sendMessage(server_socket, NORMAL, my_name);
-    sendMessage(server_socket, NORMAL, my_pwd);
-    server_response = receiveMessage(server_socket);
+    sendMessage(ssl, NORMAL, my_name);
+    sendMessage(ssl, NORMAL, my_pwd);
+    server_response = receiveMessage(ssl);
     if (!checkMessage(server_response, status))
     {
         cout << "Server break!\n";
@@ -94,7 +94,7 @@ int clientAuthProcess(int server_socket, int status)
 }
 
 // 服務選單邏輯
-void clientServiceMenu(int server_socket, int status)
+void clientServiceMenu(SSL* ssl, int status)
 {
     string op, message_to_server;
     //pair<string, string> server_response;
@@ -120,7 +120,7 @@ void clientServiceMenu(int server_socket, int status)
         cout << "Unknown operation." << "\n";
         //result = 4; // 停留在服務狀態
     }
-    sendMessage(server_socket, PROMPT, message_to_server);
+    sendMessage(ssl, PROMPT, message_to_server);
     /*
     server_response = receiveMessage(server_socket);
     result = checkMessage(server_response, result);
@@ -133,28 +133,28 @@ void clientServiceMenu(int server_socket, int status)
     */
     //return result;
 }
-void chatSome(int server_socket) 
+void chatSome(SSL* ssl) 
 {
     //cout << "Entering Chat Mode..." << "\n";
     //string prompt = receiveMessage(server_socket);
     string target_user;
     //Print_message(prompt, 1);
     cin >> target_user;
-    sendMessage(server_socket, NORMAL, target_user);
+    sendMessage(ssl, NORMAL, target_user);
 }
-void chatAndSendData(int server_socket)
+void chatAndSendData(SSL* ssl)
 {
     string choice;
     //cout << "Enter your choice: ";
     cin >> choice;
-    sendMessage(server_socket, NORMAL, choice);
+    sendMessage(ssl, NORMAL, choice);
     if (choice == "1") 
     {
         cout << "Enter your message: ";
         string message;
         cin.ignore();
         getline(cin, message);
-        sendMessage(server_socket, MESSAGE, message);
+        sendMessage(ssl, MESSAGE, message);
         //string confirmation = receiveMessage(server_socket);
         //cout << confirmation << "\n";
     } 

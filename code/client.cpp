@@ -11,10 +11,19 @@
 #include "./utils/client_change.h"
 #include <string>
 #include <iostream>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #define PROMPT "prompt"
 #define MESSAGE "message"
 #define NORMAL "normal"
 using namespace std;
+SSL_CTX* ssl_ctx; // 全局 SSL 上下文
+void initializeSSL()
+{
+    initSSL();
+    ssl_ctx = clientCreateSSLContext();
+    clientConfigureSSLContext(ssl_ctx, "ca.crt");
+}
 int main(int argc, char* argv[])
 {
     if (argc != 3)
@@ -22,17 +31,25 @@ int main(int argc, char* argv[])
         cerr << "Usage: " << argv[0] << " <hostname or IP> <port>" << "\n";
         return 1;
     }
-
     int server_socket = createSocket();
+    
     string hostname = argv[1];
     string port = argv[2];
     connectToServer(server_socket, hostname, port);
-
     int status = 1;
     int pre_status;
     bool hasPrompted = false; // 用於標記是否已經提示
     pair<string, string> incomingMessage;
-
+    initializeSSL();
+    SSL* ssl = SSL_new(ssl_ctx);
+    SSL_set_fd(ssl, server_socket);
+    if (SSL_connect(ssl) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        closeSocket(server_socket);
+        return 1;
+    }
     while (status != 0)
     {
         if (status < 4)
@@ -40,11 +57,11 @@ int main(int argc, char* argv[])
             if (status == 1)
             {
                 //cout << "here\n";
-                status = clientMainMenu(server_socket, status);
+                status = clientMainMenu(ssl, status);
             }
             else if (status == 2 || status == 3)
             {
-                status = clientAuthProcess(server_socket, status);
+                status = clientAuthProcess(ssl, status);
             }
         }
         else // 狀態 4 及其後，使用 select
@@ -64,7 +81,7 @@ int main(int argc, char* argv[])
             // 處理服務器消息
             if (FD_ISSET(server_socket, &readfds))
             {
-                incomingMessage = receiveMessage(server_socket);
+                incomingMessage = receiveMessage(ssl);
                 if (!checkMessage(incomingMessage, status))
                 {
                     cerr << "Server disconnected or invalid message received." << "\n";
@@ -102,15 +119,15 @@ int main(int argc, char* argv[])
                 //PrintPrompt(status);
                 if (status == 4)
                 {
-                    clientServiceMenu(server_socket, status);
+                    clientServiceMenu(ssl, status);
                 }
                 if (status == 5) //選和誰聊天
                 {
-                    chatSome(server_socket);
+                    chatSome(ssl);
                 }
                 if (status == 6) //選要用甚麼聊
                 {
-                    chatAndSendData(server_socket);
+                    chatAndSendData(ssl);
                 }
                 if (status == 7)
                 {
@@ -120,12 +137,13 @@ int main(int argc, char* argv[])
                     //cout << "I need to change my status from " << status << " to " << pre_status << "\n";
                     status = pre_status;
                     PrintPrompt(status);
-                    //sendMessage(server_socket, MESSAGE, to_string(status));
+                    //sendMessage(ssl, MESSAGE, to_string(status));
                 }
             }
         }
     }
-
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
     closeSocket(server_socket);
     return 0;
 }
