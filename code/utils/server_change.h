@@ -27,6 +27,8 @@ int handleClientServe(const string& message, const string& client_name, const st
 bool isUserOnline(pair<string, string> user_name);
 int handleChatServe(const string& client_name, SSL* ssl, pair<string, string>* target_name);
 int handleTextMessage(const string& client_name, const string& receiver, SSL* ssl);
+int handleSendFile(const string& client_name, const string& receiver, SSL* sender_ssl);
 int handleSendData(const string& client_name, SSL* ssl, const string& target_name);
+string parseFileName(const string& send_message);
 
 #endif // STATUS_CHANGE_H

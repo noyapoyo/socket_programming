@@ -8,8 +8,30 @@ using namespace std;
 #define REGISTER_TABLE "./data/users_table.txt"
 #define LOGIN_TABLE "./data/login_table.txt"
 #define ONLINE_TABLE "./data/online_table.txt"
-
+#define FILEID "fileid"
+#define END_OF_FILE "end_of_file"
+#define FILEDATA "filedata"
 // 檢查訊息是否有效
+string parseFileName(const string& send_message) 
+{
+    // 提取文件路徑
+    const string prefix = "I will send ";
+    size_t path_start = send_message.find(prefix);
+    if (path_start == string::npos) 
+    {
+        cerr << "Invalid message format: " << send_message << "\n";
+        return "";
+    }
+    string file_path = send_message.substr(path_start + prefix.size());
+
+    // 提取文件名
+    size_t file_name_start = file_path.find_last_of("/\\");
+    if (file_name_start != string::npos) 
+    {
+        return file_path.substr(file_name_start + 1);
+    }
+    return file_path; // 如果沒有目錄分隔符，整個路徑就是文件名
+}
 void updateClientStatus(SSL* ssl, int status)
 {
     pthread_mutex_lock(&statusMutex);
@@ -208,22 +230,6 @@ int handleClientServe(const string& message, const string& client_name, const st
     }
 }
 
-int handleTextMessage(const string& sender, const string& receiver, SSL* ssl)
-{
-    pair<string, string> Msg = receiveMessage(ssl);
-    string message = Msg.second;
-    SSL* receiver_ssl = getUserSSL(receiver); //這行要大改
-    if (receiver_ssl == NULL)
-    {
-        sendMessage(ssl, PROMPT, "Message could not be delivered. Target user went offline.");
-        return 5;
-    }
-    string full_message = "[" + sender + "]" + " " + message;
-    sendMessage(receiver_ssl, MESSAGE, full_message); ///這裡有天大的問題，要修改一些東西
-    sendMessage(ssl, NORMAL, "Message sent successfully!");
-    updateClientStatus(usernameToSSL[receiver], 7);
-    return 5;
-}
 bool isUserOnline(pair<string, string> user_name)
 {
     return getUserSSL(user_name.second) == NULL ? false : true;
@@ -245,14 +251,75 @@ int handleChatServe(const string& client_name, SSL* ssl, pair<string, string>* t
     sendMessage(ssl, PROMPT, "Target user is online.");
     return 6;
 }
-
-
+int handleTextMessage(const string& sender, const string& receiver, SSL* ssl)
+{
+    pair<string, string> Msg = receiveMessage(ssl);
+    string message = Msg.second;
+    SSL* receiver_ssl = getUserSSL(receiver);
+    if (receiver_ssl == NULL)
+    {
+        sendMessage(ssl, PROMPT, "Message could not be delivered. Target user went offline.");
+        return 5;
+    }
+    string full_message = "[" + sender + "]" + " " + message;
+    sendMessage(receiver_ssl, MESSAGE, full_message);
+    sendMessage(ssl, NORMAL, "Message sent successfully!");
+    updateClientStatus(usernameToSSL[receiver], 7);
+    return 5;
+}
+int handleSendFile(const string& sender, const string& receiver, SSL* sender_ssl) // return 的值表示 sender 的狀態
+{
+    // 接收發送方發來的檔案路徑信息
+    pair<string, string> fileMsg = receiveMessage(sender_ssl);
+    if (fileMsg.first != FILEID) 
+    {
+        cout << "here_2\n";
+        sendMessage(sender_ssl, PROMPT, "Invalid file transfer protocol.");
+        return 5; // 回到正常聊天狀態
+    }
+    // 解析檔案名稱
+    string file_name = parseFileName(fileMsg.second);
+    if (file_name.empty()) 
+    {
+        sendMessage(sender_ssl, PROMPT, "Failed to parse file name.");
+        return 5;
+    }
+    // 檢查接收方是否在線
+    SSL* receiver_ssl = getUserSSL(receiver); // 這邊會得到 receiver 的 ssl
+    if (receiver_ssl == NULL)
+    {
+        sendMessage(sender_ssl, PROMPT, "Message could not be delivered. Target user went offline.");
+        return 5;
+    }
+    // 向接收方發送文件名
+    sendMessage(receiver_ssl, FILEID, file_name);
+    // 設置計數器
+    int chunk_count = 0;
+    // 接收發送方的檔案內容並轉發給接收方
+    while (true) 
+    {
+        //cout << "I'm sending\n";
+        auto fileChunk = receiveMessage(sender_ssl);
+        if (fileChunk.first == END_OF_FILE) 
+        {
+            sendMessage(receiver_ssl, END_OF_FILE, "end!"); // 通知接收方傳輸結束
+            break;
+        }
+        sendMessage(receiver_ssl, FILEDATA, fileChunk.second); // 將內容轉發給接收方
+        chunk_count++; // 計算塊數
+    }
+    // 輸出傳輸完成的塊數
+    cout << "File transfer completed: " << chunk_count << " chunks sent.\n";
+    // 更新接收方的狀態到接收檔案狀態
+    updateClientStatus(usernameToSSL[receiver], 7); // 狀態 8 表示接收 File 的狀態
+    return 5; // 回到發送方的正常狀態
+}
 int handleSendData(const string& client_name, SSL* ssl, const string& target_name) //這裡要改
 {
     sendMessage(ssl, NORMAL, "Choose what to send:\n"
                 "0. quit\n"
                 "1. Text Message\n"
-                "2. Image\n"
+                "2. File\n"
                 "3. Video\n"
                 "4. Audio\n"
                 "5. Live Call\n"
@@ -268,9 +335,14 @@ int handleSendData(const string& client_name, SSL* ssl, const string& target_nam
     else if (choice == '1') 
     {
         handleTextMessage(client_name, target_name, ssl);
-        
         return 6;
     } 
+    else if (choice == '2')
+    {
+        //cout << "here\n";
+        handleSendFile(client_name, target_name, ssl);
+        return 6;
+    }
     else 
     {
         sendMessage(ssl, NORMAL, "This feature is not implemented yet.");

@@ -16,8 +16,10 @@
 #define PROMPT "prompt"
 #define MESSAGE "message"
 #define NORMAL "normal"
+#define FILEID "fileid"
 using namespace std;
 SSL_CTX* ssl_ctx; // 全局 SSL 上下文
+
 void initializeSSL()
 {
     initSSL();
@@ -111,8 +113,18 @@ int main(int argc, char* argv[])
                     pre_status = status;
                     status = 7;
                 }
+                else if (incomingMessage.first == FILEID)
+                {
+                    cout << "\n New File -> " << incomingMessage.second << "\n";
+                    cout << "Sending file...\n";
+                    string file_name = incomingMessage.second;
+                    //string file_name = parseFileName(incomingMessage.second);
+                    receiveFile(ssl, file_name);
+                    cout << "File received successfully!\n";
+                    pre_status = status;
+                    status = 7;
+                }
             }
-
             // 處理用戶輸入
             if (FD_ISSET(STDIN_FILENO, &readfds))
             {

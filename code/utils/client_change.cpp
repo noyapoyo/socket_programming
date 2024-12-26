@@ -5,6 +5,7 @@ using namespace std;
 #define REGISTER_TABLE "./data/users_table.txt"
 #define LOGIN_TABLE "./data/login_table.txt"
 #define ONLINE_TABLE "./data/online_table.txt"
+#define FILEID "fileid"
 int checkMessage(const pair<string, string>& message, int status)
 {
     if (message.first.empty() || message.second.empty())
@@ -150,14 +151,25 @@ void chatAndSendData(SSL* ssl)
     sendMessage(ssl, NORMAL, choice);
     if (choice == "1") 
     {
-        cout << "Enter your message: ";
+        cout << "Input your message: ";
         string message;
         cin.ignore();
         getline(cin, message);
         sendMessage(ssl, MESSAGE, message);
         //string confirmation = receiveMessage(server_socket);
         //cout << confirmation << "\n";
-    } 
+    }
+    else if (choice == "2")
+    {
+        cout << "Input your file path: ";
+        string file_path;
+        cin.ignore();
+        getline(cin, file_path);
+        string send_message = "I will send " + file_path;
+        sendMessage(ssl, FILEID, send_message);
+        sendFile(ssl, file_path);
+        cout << "File sent successfully!" << "\n";
+    }
 }
 int MsgStatusChange(const string& Msg, int status)
 {
@@ -197,9 +209,9 @@ void PrintPrompt(int status)
     if (status == 6)
     {
         cout << "Choose what to send:\n"
-                "0. quit\n"
+                "0. Quit\n"
                 "1. Text Message\n"
-                "2. Image\n"
+                "2. File\n"
                 "3. Video\n"
                 "4. Audio\n"
                 "5. Live Call\n"

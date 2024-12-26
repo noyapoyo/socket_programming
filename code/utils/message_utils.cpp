@@ -8,6 +8,9 @@
 #include <string>
 #include <unistd.h>
 using namespace std;
+#define FILEID "fileid"
+#define END_OF_FILE "end_of_file"
+#define FILEDATA "filedata"
 /*
 這邊未來要引入pthread還有UDP傳送，會大改
 */
@@ -85,11 +88,9 @@ void sendMessage(SSL* ssl, const string& identifier, const string& message)
 {
     // 並接消息標識符和內容，格式為：<標識符>:<消息內容>
     string full_message = identifier + ":" + message;
-
     // 發送消息的長度
     int32_t message_length = full_message.size();
     message_length = htonl(message_length); // 將長度轉換為網絡字節序
-
     if (SSL_write(ssl, &message_length, sizeof(message_length)) <= 0)
     {
         cerr << "Failed to send message length." << "\n";
@@ -117,14 +118,20 @@ pair<string, string> receiveMessage(SSL* ssl)
     {
         int n = SSL_read(ssl, ((char*)&message_length_net) + bytes_received_length,
                          sizeof(message_length_net) - bytes_received_length);
+<<<<<<< HEAD
 
+=======
+>>>>>>> master
         if (n <= 0)
         {
             cerr << "Failed to receive message length." << "\n";
             ERR_print_errors_fp(stderr);
             return {"", ""};
         }
+<<<<<<< HEAD
 
+=======
+>>>>>>> master
         bytes_received_length += n;
     }
 
@@ -166,58 +173,61 @@ pair<string, string> receiveMessage(SSL* ssl)
 
     return {identifier, message}; // 返回標識符和內容
 }
-int sendFile(const string& file_path, int client_socket) 
+void sendFile(SSL* ssl, const string& file_path) 
 {
-    ifstream file(file_path, ios::binary);
-    if (!file.is_open()) 
+    // 打開文件
+    FILE* file = fopen(file_path.c_str(), "rb");
+    //cout << "now_1\n";
+    if (!file) //這邊很重要，路徑複製不能直接在檔案總管複製，不然會出錯
     {
-        cerr << "Error: Unable to open file " << file_path << "\n";
-        return -1;
+        //cout << "now fail send file\n";
+        cerr << "Failed to open file: " << file_path << "\n";
+        return;
     }
-    char buffer[1024];
-    while (!file.eof()) 
+    char buffer[2048];
+    size_t bytes_read;
+    int chunk_count = 0; // 計算塊數
+    //cout << "now_2\n";
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) 
     {
-        file.read(buffer, sizeof(buffer));
-        int bytes_read = file.gcount();
-        if (send(client_socket, buffer, bytes_read, 0) < 0) 
-        {
-            cerr << "Error: Failed to send file data." << "\n";
-            file.close();
-            return -1;
-        }
+        //cout << "client sending\n";
+        string file_chunk(buffer, bytes_read);
+        sendMessage(ssl, FILEDATA, file_chunk); // 使用 FILEDATA 標識符發送文件內容
+        chunk_count++;
     }
-    string end_of_file = "END_OF_FILE";
-    send(client_socket, end_of_file.c_str(), end_of_file.size(), 0);
-
-    file.close();
-    return 0;
+    //cout << "now_3\n";
+    fclose(file);
+    // 發送結束標誌
+    sendMessage(ssl, END_OF_FILE, ""); // 使用 END_OF_FILE 標識符通知接收方文件傳輸結束
+    cout << "File transfer completed: " << file_path << " (" << chunk_count << " chunks sent)\n";
 }
-int receiveFile(const string& file_path, int server_socket) 
+void receiveFile(SSL* ssl, const string& output_file) 
 {
-    ofstream file(file_path, ios::binary);
-    if (!file.is_open()) 
+    FILE* file = fopen(output_file.c_str(), "wb");
+    if (!file) 
     {
-        cerr << "Error: Unable to create file " << file_path << "\n";
-        return -1;
+        cerr << "Failed to open file for writing: " << output_file << "\n";
+        return;
     }
-    char buffer[1024];
     while (true) 
     {
-        int bytes_received = recv(server_socket, buffer, sizeof(buffer), 0);
-        if (bytes_received < 0) 
-        {
-            cerr << "Error: Failed to receive file data." << "\n";
-            file.close();
-            return -1;
-        }
-        if (bytes_received == 0 || string(buffer, bytes_received).find("END_OF_FILE") != string::npos) 
+        pair<string, string> fileChunk = receiveMessage(ssl);
+        if (fileChunk.first == END_OF_FILE) 
         {
             break;
         }
-        file.write(buffer, bytes_received);
+        else if (fileChunk.first == FILEDATA) 
+        {
+            fwrite(fileChunk.second.c_str(), 1, fileChunk.second.size(), file);
+        }
+        else 
+        {
+            cerr << "Unexpected message identifier: " << fileChunk.first << "\n";
+            break;
+        }
     }
-    file.close();
-    return 0;
+    fclose(file);
+    cout << "File received successfully: " << output_file << "\n";
 }
 void Print_message(const string &message, int status) 
 {
@@ -263,3 +273,5 @@ void handleTextMessage(const string& sender, const string& receiver, int sender_
     }
 }
 */
+
+

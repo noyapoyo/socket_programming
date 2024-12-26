@@ -177,7 +177,7 @@ void handleTCPConnection(int client_socket)
                 removeUsernameToSSL(client_name);
             status = getStatus(ssl);
         }
-        if (status == 5) // 客戶在線中
+        if (status == 5) // 客戶在線中且正在輸入要和誰通訊
         {
             pair<string, string> target_name = {"", ""};
             status = handleChatServe(client_name, ssl, &target_name);
@@ -186,13 +186,13 @@ void handleTCPConnection(int client_socket)
             updateClientStatus(ssl, status);
             status = getStatus(ssl);
         }
-        if (status == 6) // 客戶在線中
+        if (status == 6) // 客戶在線中且正在選擇如何通訊
         {
             status = handleSendData(client_name, ssl, my_target);
             updateClientStatus(ssl, status);
             status = getStatus(ssl);
         }
-        if (status == 7) // 客戶在線中
+        if (status == 7) // 客戶在線中且正在接收純文字訊息
         {
             //status = handleSendData(client_name, client_socket, my_target);
             //updateClientStatus(client_socket, status);
