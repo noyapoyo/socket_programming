@@ -3,8 +3,4 @@ all:
 	g++ client.cpp utils/network_utils.cpp utils/message_utils.cpp utils/auth_utils.cpp utils/client_change.cpp utils/other.cpp -pthread -lssl -lcrypto -o client
 
 clean:
-<<<<<<< HEAD
 	rm -f client server
-=======
-	rm -f client server
->>>>>>> master

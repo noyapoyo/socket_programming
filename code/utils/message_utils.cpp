@@ -118,20 +118,12 @@ pair<string, string> receiveMessage(SSL* ssl)
     {
         int n = SSL_read(ssl, ((char*)&message_length_net) + bytes_received_length,
                          sizeof(message_length_net) - bytes_received_length);
-<<<<<<< HEAD
-
-=======
->>>>>>> master
         if (n <= 0)
         {
             cerr << "Failed to receive message length." << "\n";
             ERR_print_errors_fp(stderr);
             return {"", ""};
         }
-<<<<<<< HEAD
-
-=======
->>>>>>> master
         bytes_received_length += n;
     }
 
