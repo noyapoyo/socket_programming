@@ -18,4 +18,6 @@ SSL_CTX* serverCreateSSLContext();
 void serverConfigureSSLContext(SSL_CTX* ctx, const string& cert_file, const string& key_file);
 SSL_CTX* clientCreateSSLContext();
 void clientConfigureSSLContext(SSL_CTX* ctx, const string& ca_file);
+void sendAudioBasedData(SSL* ssl, const string& file_path);
+void receiveAudioBasedData(SSL* ssl);
 #endif // MESSAGE_UTILS_H

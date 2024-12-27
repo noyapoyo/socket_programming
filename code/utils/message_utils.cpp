@@ -7,10 +7,22 @@
 #include <fstream>
 #include <string>
 #include <unistd.h>
+#include <vector>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <SDL2/SDL.h>
+#include <sndfile.hh> // 用于讀取 WAV 文件信息
 using namespace std;
 #define FILEID "fileid"
 #define END_OF_FILE "end_of_file"
 #define FILEDATA "filedata"
+#define AUDIO "audio"
+#define AUDIO_DATA "audio_data"
+#define AUDIO_END "audio_end"
+// 音頻採樣率和帧大小
+#define SAMPLE_RATE 44100
+#define FRAMES_PER_BUFFER 1024
 /*
 這邊未來要引入pthread還有UDP傳送，會大改
 */
@@ -239,31 +251,78 @@ void Print_message(const string &message, int status)
         cout << "[Unknown]: " << message << "\n";
     }
 }
-/*
-bool isDataAvailable(int socket_fd) 
+void sendAudioBasedData(SSL* ssl, const string& file_path) 
 {
-    fd_set read_fds;
-    struct timeval timeout;
-
-    FD_ZERO(&read_fds);
-    FD_SET(socket_fd, &read_fds);
-
-    timeout.tv_sec = 0;  // 无需阻塞
-    timeout.tv_usec = 10000;  // 10ms 超时时间
-
-    int result = select(socket_fd + 1, &read_fds, nullptr, nullptr, &timeout);
-    return (result > 0 && FD_ISSET(socket_fd, &read_fds));
-}
-void handleTextMessage(const string& sender, const string& receiver, int sender_socket) {
-    int receiver_socket = getUserSocket(receiver);
-    if (receiver_socket == -1) {
-        sendMessage(sender_socket, "Message could not be delivered. Target user is offline.");
-    } else {
-        string message = sender + ": " + receiveMessage(sender_socket);
-        sendMessage(receiver_socket, message);
-        sendMessage(sender_socket, "Message sent successfully.");
+    std::filesystem::path file_path_obj(file_path);
+    string extension = file_path_obj.extension().string();
+    if (extension != ".wav") 
+    {
+        cerr << "Error: Only .wav files are supported. Provided file: " << file_path << "\n";
+        return;
     }
+    SndfileHandle file_handle(file_path);
+    if (file_handle.error()) 
+    {
+        cerr << "Error: Unable to open WAV file: " << file_path << "\n";
+        return;
+    }
+    int sample_rate = file_handle.samplerate();
+    int channels = file_handle.channels();
+    cout << "WAV file sample rate: " << sample_rate << ", channels: " << channels << "\n";
+    sendMessage(ssl, AUDIO, to_string(sample_rate) + "," + to_string(channels) + "," + file_path_obj.filename().string());
+    const size_t CHUNK_SIZE = 4096;
+    vector<short> buffer(CHUNK_SIZE / sizeof(short));
+    size_t frames_read;
+    while ((frames_read = file_handle.read(buffer.data(), buffer.size())) > 0) 
+    {
+        string chunk_data(reinterpret_cast<char*>(buffer.data()), frames_read * sizeof(short));
+        sendMessage(ssl, AUDIO_DATA, chunk_data);
+    }
+
+    sendMessage(ssl, AUDIO_END, "END");
+    cout << "WAV file transmission completed: " << file_path << "\n";
 }
-*/
 
+void receiveAudioBasedData(SSL* ssl) 
+{
+    int sample_rate = 44100;
+    int channels = 2;
+    while (true) 
+    {
+        auto message = receiveMessage(ssl);
+        if (message.first == AUDIO) 
+        {
+            sscanf(message.second.c_str(), "%d,%d", &sample_rate, &channels);
+            SDL_CloseAudio();
+            SDL_AudioSpec desiredSpec;
+            SDL_zero(desiredSpec);
+            desiredSpec.freq = sample_rate;
+            desiredSpec.format = AUDIO_S16SYS;
+            desiredSpec.channels = channels;
+            desiredSpec.samples = 4096;
 
+            if (SDL_OpenAudio(&desiredSpec, NULL) < 0) 
+            {
+                cerr << "Error: Unable to configure SDL audio: " << SDL_GetError() << "\n";
+                return;
+            }
+
+            SDL_PauseAudio(0);
+        } 
+        else if (message.first == AUDIO_DATA) 
+        {
+            const string& frame_data = message.second;
+            SDL_QueueAudio(1, frame_data.data(), frame_data.size());
+        } 
+        else if (message.first == AUDIO_END) 
+        {
+            cout << "Streaming completed." << "\n";
+            break;
+        }
+    }
+    while (SDL_GetQueuedAudioSize(1) > 0) 
+    {
+        SDL_Delay(100);
+    }
+    SDL_CloseAudio();
+}

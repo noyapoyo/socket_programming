@@ -29,6 +29,7 @@ int handleChatServe(const string& client_name, SSL* ssl, pair<string, string>* t
 int handleTextMessage(const string& client_name, const string& receiver, SSL* ssl);
 int handleSendFile(const string& client_name, const string& receiver, SSL* sender_ssl);
 int handleSendData(const string& client_name, SSL* ssl, const string& target_name);
+int handleSendAudio(const string& sender, const string& receiver, SSL* sender_ssl);
 string parseFileName(const string& send_message);
 
 #endif // STATUS_CHANGE_H
