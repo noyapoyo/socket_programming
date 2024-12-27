@@ -2,7 +2,8 @@
 #include <iostream>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-
+#include <vector>
+#include <cstring>
 using namespace std;
 
 #define REGISTER_TABLE "./data/users_table.txt"
@@ -11,6 +12,9 @@ using namespace std;
 #define FILEID "fileid"
 #define END_OF_FILE "end_of_file"
 #define FILEDATA "filedata"
+#define AUDIO "audio"
+#define AUDIO_DATA "audio_data"
+#define AUDIO_END "audio_end"
 // 檢查訊息是否有效
 string parseFileName(const string& send_message) 
 {
@@ -314,16 +318,75 @@ int handleSendFile(const string& sender, const string& receiver, SSL* sender_ssl
     updateClientStatus(usernameToSSL[receiver], 7); // 狀態 8 表示接收 File 的狀態
     return 5; // 回到發送方的正常狀態
 }
+int handleSendAudio(const string& sender, const string& receiver, SSL* sender_ssl)
+{
+    // 检查接收方是否在线
+    SSL* receiver_ssl = getUserSSL(receiver);
+    if (receiver_ssl == NULL)
+    {
+        sendMessage(sender_ssl, PROMPT, "Audio could not be delivered. Target user went offline.");
+        return 5; // 回到聊天状态
+    }
+    // 接收发起方的音频文件路径
+    pair<string, string> audioMsg = receiveMessage(sender_ssl);
+    if (audioMsg.first != AUDIO)
+    {
+        sendMessage(sender_ssl, PROMPT, "Invalid audio stream protocol.");
+        return 5; // 回到聊天状态
+    }
+    // 解析音频文件路径
+    string audio_path = parseFileName(audioMsg.second);
+    if (audio_path.empty())
+    {
+        sendMessage(sender_ssl, PROMPT, "Failed to parse audio file path.");
+        return 5;
+    }
+    // 转发音频文件路径给接收方
+    sendMessage(receiver_ssl, AUDIO, audio_path);
+    // 接收发起方的音频元数据（如采样率和通道数）
+    auto audioMetaMsg = receiveMessage(sender_ssl);
+    if (audioMetaMsg.first != AUDIO)
+    {
+        sendMessage(sender_ssl, PROMPT, audioMetaMsg.first + " Invalid audio metadata protocol.");
+        return 5;
+    }
+    // 转发音频元数据给接收方
+    sendMessage(receiver_ssl, AUDIO, audioMetaMsg.second);
+    // 开始逐帧接收发送方的音频数据并转发给接收方
+    int chunk_count = 0;
+    while (true)
+    {
+        auto audioChunk = receiveMessage(sender_ssl);
+        if (audioChunk.first == AUDIO_END && audioChunk.second == "END")
+        {
+            sendMessage(receiver_ssl, AUDIO_END, "END"); // 通知接收方音频流结束
+            break;
+        }
+        else if (audioChunk.first == AUDIO_DATA)
+        {
+            sendMessage(receiver_ssl, AUDIO_DATA, audioChunk.second); // 将音频数据帧转发给接收方
+            chunk_count++;
+        }
+        else
+        {
+            cerr << "Unexpected message type during audio streaming: " << audioChunk.first << "\n";
+            break;
+        }
+    }
+    // 输出完成信息
+    cout << "Audio streaming completed: " << chunk_count << " frames sent.\n";
+    // 更新接收方状态
+    updateClientStatus(usernameToSSL[receiver], 7); // 更新接收方状态到接收消息状态
+    return 5; // 返回发起方状态到聊天状态
+}
+
 int handleSendData(const string& client_name, SSL* ssl, const string& target_name) //這裡要改
 {
     sendMessage(ssl, NORMAL, "Choose what to send:\n"
                 "0. quit\n"
                 "1. Text Message\n"
                 "2. File\n"
-                "3. Video\n"
-                "4. Audio\n"
-                "5. Live Call\n"
-                "6. Live Video\n"
+                "3. Audio\n"
                 "Enter your choice: ");
     pair<string, string> Msg = receiveMessage(ssl);
     char choice = Msg.second[0];
@@ -341,6 +404,12 @@ int handleSendData(const string& client_name, SSL* ssl, const string& target_nam
     {
         //cout << "here\n";
         handleSendFile(client_name, target_name, ssl);
+        return 6;
+    }
+    else if (choice == '3')
+    {
+        handleSendAudio(client_name, target_name, ssl);
+        cout << "send audio OK\n";
         return 6;
     }
     else 

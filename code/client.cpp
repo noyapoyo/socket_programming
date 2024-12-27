@@ -13,13 +13,41 @@
 #include <iostream>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <SDL2/SDL.h>
 #define PROMPT "prompt"
 #define MESSAGE "message"
 #define NORMAL "normal"
 #define FILEID "fileid"
+#define AUDIO "audio"
 using namespace std;
 SSL_CTX* ssl_ctx; // 全局 SSL 上下文
+void initializeAudio() 
+{
+    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+        fprintf(stderr, "Failed to initialize SDL: %s\n", SDL_GetError());
+        exit(1);
+    }
 
+    SDL_AudioSpec desiredSpec;
+    SDL_zero(desiredSpec);
+
+    desiredSpec.freq = 44100;                 // 音頻採樣率
+    desiredSpec.format = AUDIO_S16SYS;       // 音頻格式：16 位整數
+    desiredSpec.channels = 2;                // 立體聲
+    desiredSpec.samples = 4096;              // 緩衝區大小
+    desiredSpec.callback = NULL;             // 我們將手動填充緩衝區
+
+    if (SDL_OpenAudio(&desiredSpec, NULL) < 0) {
+        fprintf(stderr, "Failed to open audio: %s\n", SDL_GetError());
+        exit(1);
+    }
+    SDL_PauseAudio(0); // 開始播放音頻
+}
+void terminateAudio() 
+{
+    SDL_CloseAudio();
+    SDL_Quit();
+}
 void initializeSSL()
 {
     initSSL();
@@ -33,6 +61,7 @@ int main(int argc, char* argv[])
         cerr << "Usage: " << argv[0] << " <hostname or IP> <port>" << "\n";
         return 1;
     }
+    initializeAudio();
     int server_socket = createSocket();
     
     string hostname = argv[1];
@@ -49,6 +78,7 @@ int main(int argc, char* argv[])
     {
         ERR_print_errors_fp(stderr);
         SSL_free(ssl);
+        terminateAudio();
         closeSocket(server_socket);
         return 1;
     }
@@ -109,8 +139,9 @@ int main(int argc, char* argv[])
                     cout << "\n--- New Message ---" << "\n";
                     cout << incomingMessage.second << "\n";
                     cout << "Press Enter to continue." << "\n";
-                    cout << "Message come my status = " << status << "\n";
-                    pre_status = status;
+                    //cout << "Message come my status = " << status << "\n";
+                    if (status != 7) 
+                        pre_status = status;
                     status = 7;
                 }
                 else if (incomingMessage.first == FILEID)
@@ -121,7 +152,21 @@ int main(int argc, char* argv[])
                     //string file_name = parseFileName(incomingMessage.second);
                     receiveFile(ssl, file_name);
                     cout << "File received successfully!\n";
-                    pre_status = status;
+                    if (status != 7) 
+                        pre_status = status;
+                    status = 7;
+                }
+                else if (incomingMessage.first == AUDIO)
+                {
+                    cout << "\n New audio -> " << incomingMessage.second << "\n";
+                    cout << "Sending audio...\n";
+                    //string file_name = incomingMessage.second;
+                    //string file_name = parseFileName(incomingMessage.second);
+                    //receiveFile(ssl, file_name);
+                    receiveAudioBasedData(ssl);
+                    cout << "Audio received successfully!\n";
+                    if (status != 7) 
+                        pre_status = status;
                     status = 7;
                 }
             }
@@ -146,16 +191,18 @@ int main(int argc, char* argv[])
                     //cout << "here\n";
                     string temp;
                     getline(cin, temp); // 等待用户按下 Enter
-                    //cout << "I need to change my status from " << status << " to " << pre_status << "\n";
+                    cout << "I need to change my status from " << status << " to " << pre_status << "\n";
                     status = pre_status;
                     PrintPrompt(status);
                     //sendMessage(ssl, MESSAGE, to_string(status));
                 }
+                
             }
         }
     }
     SSL_shutdown(ssl);
     SSL_free(ssl);
     closeSocket(server_socket);
+    terminateAudio();
     return 0;
 }

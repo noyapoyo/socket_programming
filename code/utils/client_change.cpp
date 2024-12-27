@@ -6,6 +6,11 @@ using namespace std;
 #define LOGIN_TABLE "./data/login_table.txt"
 #define ONLINE_TABLE "./data/online_table.txt"
 #define FILEID "fileid"
+#define END_OF_FILE "end_of_file"
+#define FILEDATA "filedata"
+#define AUDIO "audio"
+#define AUDIO_DATA "audio_data"
+#define AUDIO_END "audio_end"
 int checkMessage(const pair<string, string>& message, int status)
 {
     if (message.first.empty() || message.second.empty())
@@ -170,6 +175,19 @@ void chatAndSendData(SSL* ssl)
         sendFile(ssl, file_path);
         cout << "File sent successfully!" << "\n";
     }
+    else if (choice == "3")
+    {
+        cout << "Input your audio path: ";
+        string file_path;
+        cin.ignore();
+        getline(cin, file_path);
+        string send_message = "I will send " + file_path;
+        sendMessage(ssl, AUDIO, send_message);
+        cout << "You need to wait for audio playback finishing\n";
+        sendAudioBasedData(ssl, file_path);
+        cout << "Audio send successfully!\n";
+    }
+    
 }
 int MsgStatusChange(const string& Msg, int status)
 {
@@ -206,16 +224,17 @@ void PrintPrompt(int status)
     {
         cout << "Enter operation (1: Chat with someone, 2: Logout, 3: Exit): " << flush;
     }
+    else if (status == 5)
+    {
+        cout << "Who do you want to chat : " << flush;
+    }
     if (status == 6)
     {
         cout << "Choose what to send:\n"
                 "0. Quit\n"
                 "1. Text Message\n"
                 "2. File\n"
-                "3. Video\n"
-                "4. Audio\n"
-                "5. Live Call\n"
-                "6. Live Video\n"
+                "3. Audio\n"
                 "Enter your choice: " << flush;
     }
 }
